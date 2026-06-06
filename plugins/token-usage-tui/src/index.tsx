@@ -1,16 +1,19 @@
 /** @jsxImportSource @opentui/solid */
 /** @jsxRuntime automatic */
 import type { TuiPlugin } from "@opencode-ai/plugin/tui"
-import { createSignal } from "solid-js"
 import * as fs from "node:fs"
 import * as path from "node:path"
-import * as os from "node:os"
 import { TokenSidebar } from "./components/TokenSidebar"
 import type { SkillSize } from "./aggregator"
 
 const TEXT_EXTS = new Set([".md", ".markdown", ".txt", ".yaml", ".yml", ".json", ".html"])
 
-const walkSkill = (dir: string): { chars: number; fileCount: number } => {
+export type ScanSkillOptions = {
+  homeDir?: string
+  includeGlobal?: boolean
+}
+
+export const walkSkill = (dir: string): { chars: number; fileCount: number } => {
   let chars = 0
   let fileCount = 0
   const stack = [dir]
@@ -33,7 +36,7 @@ const walkSkill = (dir: string): { chars: number; fileCount: number } => {
         try {
           const stat = fs.statSync(full)
           if (stat.size > 1_000_000) continue
-          chars += stat.size
+          chars += fs.readFileSync(full, "utf8").length
           fileCount++
         } catch {}
       }
@@ -42,17 +45,26 @@ const walkSkill = (dir: string): { chars: number; fileCount: number } => {
   return { chars, fileCount }
 }
 
-const scanSkillSizes = (worktree: string): { names: string[]; sizes: SkillSize[] } => {
+export const scanSkillSizes = (
+  worktree: string,
+  options: ScanSkillOptions = {}
+): { names: string[]; sizes: SkillSize[] } => {
   const seen = new Map<string, { root: string; chars: number; fileCount: number }>()
-  const home = os.homedir()
   const roots = [
     path.join(worktree, ".opencode", "skills"),
     path.join(worktree, ".opencode", "skill"),
-    path.join(home, ".config", "opencode", "skills"),
-    path.join(home, ".config", "opencode", "skill"),
-    path.join(home, ".claude", "skills"),
-    path.join(home, ".agents", "skills"),
   ]
+  if (options.includeGlobal) {
+    const home = options.homeDir ?? process.env.HOME ?? process.env.USERPROFILE ?? ""
+    if (home) {
+      roots.push(
+        path.join(home, ".config", "opencode", "skills"),
+        path.join(home, ".config", "opencode", "skill"),
+        path.join(home, ".claude", "skills"),
+        path.join(home, ".agents", "skills")
+      )
+    }
+  }
   for (const root of roots) {
     if (!fs.existsSync(root)) continue
     let entries: fs.Dirent[]
@@ -83,11 +95,13 @@ const scanSkillSizes = (worktree: string): { names: string[]; sizes: SkillSize[]
   return { names: sizes.map((s) => s.name), sizes }
 }
 
+export const createInitialSkillState = (): { names: string[]; sizes: SkillSize[] } => ({
+  names: [],
+  sizes: [],
+})
+
 const plugin: TuiPlugin = async (api, _options, _meta) => {
   const worktree = api.state.path.worktree || process.cwd()
-  const scanned = scanSkillSizes(worktree)
-  const [loadedSkills] = createSignal<string[]>(scanned.names)
-  const [skillSizes] = createSignal<SkillSize[]>(scanned.sizes)
 
   api.slots.register({
     order: 50,
@@ -100,6 +114,7 @@ const plugin: TuiPlugin = async (api, _options, _meta) => {
         return (
           <TokenSidebar
             sessionId={sessionId}
+            worktree={worktree}
             getMessages={(id) => {
               try {
                 return api.state.session.messages(id)
@@ -114,8 +129,6 @@ const plugin: TuiPlugin = async (api, _options, _meta) => {
                 return []
               }
             }}
-            loadedSkills={loadedSkills()}
-            skillSizes={skillSizes()}
             theme={ctx.theme}
             refreshMs={750}
           />

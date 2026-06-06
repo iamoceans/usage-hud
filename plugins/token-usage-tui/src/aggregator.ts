@@ -16,6 +16,12 @@ export type SkillSize = {
   fileCount: number
 }
 
+export type SkillUsage = {
+  name: string
+  totalEstTokens: number
+  turns: number
+}
+
 export type Aggregated = {
   total: TokenBucket
   byTool: Record<string, TokenBucket>
@@ -61,12 +67,25 @@ const isAssistant = (m: AnyMessage): m is AssistantMessage & { tokens?: any } =>
 
 type PartLike = { type?: string; messageID?: string; tool?: string; state?: any }
 
+const stringifyToolPayload = (value: unknown): string => {
+  if (value == null) return ""
+  if (typeof value === "string") return value
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return String(value)
+  }
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
 const getToolOutput = (p: PartLike): string => {
   if (p?.type !== "tool") return ""
   const s = p.state
   if (!s) return ""
-  if (s.status === "completed") return String(s.output ?? "")
-  if (s.status === "error") return String(s.error ?? "")
+  if (s.status === "completed") return stringifyToolPayload(s.output)
+  if (s.status === "error") return stringifyToolPayload(s.error)
   return ""
 }
 
@@ -117,16 +136,18 @@ export function aggregate(
     }
 
     if (toolOutputs.length === 0) continue
-    if ((increment.input ?? 0) <= 0) continue
+
+    const totalPromptTokens = (increment.input ?? 0) + (increment.cacheRead ?? 0)
+    if (totalPromptTokens <= 0) continue
 
     let totalOutChars = 0
     for (const t of toolOutputs) totalOutChars += t.chars
     if (totalOutChars <= 0) continue
 
     const estimatedToolInput = Math.ceil(totalOutChars / 4)
-    const denom = (increment.input ?? 0) + (increment.cacheRead ?? 0) + 1
+    const denom = totalPromptTokens + 1
     const ratio = Math.min(1, estimatedToolInput / denom)
-    const totalAllocated = Math.round(((increment.input ?? 0) + (increment.cacheRead ?? 0)) * ratio)
+    const totalAllocated = Math.round(totalPromptTokens * ratio)
 
     for (const { tool, chars } of toolOutputs) {
       const share = totalOutChars > 0 ? chars / totalOutChars : 1 / toolOutputs.length

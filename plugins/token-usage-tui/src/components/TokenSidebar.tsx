@@ -1,16 +1,17 @@
 /** @jsxImportSource @opentui/solid */
 /** @jsxRuntime automatic */
-import { createSignal, onCleanup, Show, For } from "solid-js"
+import { createMemo, createSignal, onCleanup, Show, For } from "solid-js"
 import type { Message, Part } from "@opencode-ai/sdk/v2"
 import type { TuiTheme } from "@opencode-ai/plugin/tui"
-import { aggregate, formatNum, topTools, bucketTotal, type TokenBucket, type SkillSize } from "../aggregator"
+import { formatNum, topTools, bucketTotal, type TokenBucket } from "../aggregator"
+import { buildSkillSectionModel } from "../skill-usage"
+import { createAggregateReader, createSkillUsageReader } from "../runtime-cache"
 
 export type TokenSidebarProps = {
   sessionId: string
+  worktree: string
   getMessages: (id: string) => ReadonlyArray<Message>
   getParts: (messageID: string) => ReadonlyArray<Part>
-  loadedSkills: string[]
-  skillSizes: SkillSize[]
   theme: TuiTheme
   refreshMs?: number
 }
@@ -21,21 +22,22 @@ export function TokenSidebar(props: TokenSidebarProps) {
   onCleanup(() => clearInterval(interval))
 
   const refreshMs = props.refreshMs ?? 750
+  const readAggregate = createAggregateReader(props.getMessages, props.getParts)
+  const readSkillUsage = createSkillUsageReader(props.worktree)
 
-  const compute = () => {
+  const data = createMemo(() => {
+    tick()
     try {
-      const messages = props.getMessages(props.sessionId)
-      return aggregate(messages, (mid) => props.getParts(mid), props.loadedSkills, props.skillSizes)
+      return readAggregate(props.sessionId)
     } catch {
       return null
     }
-  }
+  })
 
-  // Re-compute on each tick to force reactivity.
-  const data = () => {
+  const skillSection = createMemo(() => {
     tick()
-    return compute()
-  }
+    return buildSkillSectionModel(readSkillUsage(props.sessionId))
+  })
 
   const t = props.theme.current
   const colorText = t.text
@@ -47,6 +49,7 @@ export function TokenSidebar(props: TokenSidebarProps) {
   return (
     <Show when={data()} fallback={<text fg={colorMuted}>loading token usage…</text>}>
       {(d) => {
+        const section = skillSection()
         const tot = () => d().total
         const tools = () => topTools(d().byTool, 5)
         const totalAll = () => bucketTotal(tot())
@@ -90,23 +93,22 @@ export function TokenSidebar(props: TokenSidebarProps) {
             <text>{" "}</text>
 
             {/* Skills section */}
-            <text fg={colorAccent}>{"─ Skills Loaded (est) ─".padEnd(40, " ")}</text>
+            <text fg={colorAccent}>{section.title.padEnd(40, " ")}</text>
             <Show
-              when={data_().skillSizes.length > 0}
-              fallback={<text fg={colorMuted}>{"  (none detected)"}</text>}
+              when={section.rows.length > 0}
+              fallback={<text fg={colorMuted}>{section.emptyText}</text>}
             >
-              <For each={data_().skillSizes.slice(0, 8)}>
+              <For each={section.rows}>
                 {(s) => (
                   <box flexDirection="row">
                     <text fg={colorText}>{`  • ${s.name.slice(0, 22)}`.padEnd(22, " ")}</text>
-                    <text fg={colorMuted}>{` ${formatNum(s.estTokens)}*`}</text>
+                    <text fg={colorMuted}>{` ${s.display}`}</text>
                   </box>
                 )}
               </For>
-              <Show when={data_().skillSizes.length > 8}>
-                <text fg={colorMuted}>{`  … +${data_().skillSizes.length - 8} more`}</text>
+              <Show when={section.total > 8}>
+                <text fg={colorMuted}>{`  … +${section.total - 8} more`}</text>
               </Show>
-              <text fg={colorMuted}>{"  * = static size (chars/4)"}</text>
             </Show>
 
             <text fg={colorMuted}>{`  (refresh: ${refreshMs}ms)`}</text>
