@@ -6,7 +6,6 @@ export type TokenBucket = {
   cacheRead: number
   cacheWrite: number
   reasoning: number
-  cost: number
   steps: number
 }
 
@@ -33,7 +32,6 @@ const empty = (): TokenBucket => ({
   cacheRead: 0,
   cacheWrite: 0,
   reasoning: 0,
-  cost: 0,
   steps: 0,
 })
 
@@ -43,7 +41,6 @@ const add = (a: TokenBucket, b: Partial<TokenBucket>): void => {
   a.cacheRead += b.cacheRead ?? 0
   a.cacheWrite += b.cacheWrite ?? 0
   a.reasoning += b.reasoning ?? 0
-  a.cost += b.cost ?? 0
   a.steps += b.steps ?? 0
 }
 
@@ -57,9 +54,9 @@ const bucketTotal = (b: TokenBucket): number =>
 export type AssistantMessage = Extract<Message, { role: "assistant" }>
 export type UserMessage = Extract<Message, { role: "user" }>
 
-type AnyMessage = { id: string; role?: string; tokens?: any; cost?: number; sessionID?: string }
+type AnyMessage = { id: string; role?: string; tokens?: any; sessionID?: string }
 
-const isAssistant = (m: AnyMessage): m is AssistantMessage & { tokens?: any; cost?: number } =>
+const isAssistant = (m: AnyMessage): m is AssistantMessage & { tokens?: any } =>
   m?.role === "assistant"
 
 type PartLike = { type?: string; messageID?: string; tool?: string; state?: any }
@@ -104,7 +101,6 @@ export function aggregate(
       cacheRead: t.cache?.read ?? 0,
       cacheWrite: t.cache?.write ?? 0,
       reasoning: t.reasoning ?? 0,
-      cost: m.cost ?? 0,
       steps: 1,
     }
     add(result.total, increment)

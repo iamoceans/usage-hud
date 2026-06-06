@@ -66,7 +66,6 @@ export function TokenSidebar(props: TokenSidebarProps) {
             <text fg={colorMuted}>{"  ├─ out ".padEnd(14, " ")}{formatNum(tot().output ?? 0)}</text>
             <text fg={colorSuccess}>{"  ├─ cache.r ".padEnd(14, " ")}{formatNum(tot().cacheRead ?? 0)}</text>
             <text fg={colorMuted}>{"  └─ cache.w ".padEnd(14, " ")}{formatNum(tot().cacheWrite ?? 0)}</text>
-            <text fg={colorWarning}>{"  💰 Cost".padEnd(14, " ")}${(tot().cost ?? 0).toFixed(4)}</text>
             <text fg={colorMuted}>{"  🔄 Steps".padEnd(14, " ")}{tot().steps ?? 0}</text>
             <text fg={colorMuted}>{"  📨 Msgs".padEnd(14, " ")}{data_().messageCount}</text>
 
@@ -98,7 +97,10 @@ export function TokenSidebar(props: TokenSidebarProps) {
             >
               <For each={data_().skillSizes.slice(0, 8)}>
                 {(s) => (
-                  <text fg={colorText}>{`  • ${s.name.slice(0, 22)}`.padEnd(26, " ")}<text fg={colorMuted}>{` ${formatNum(s.estTokens)}*`}</text></text>
+                  <box flexDirection="row">
+                    <text fg={colorText}>{`  • ${s.name.slice(0, 22)}`.padEnd(22, " ")}</text>
+                    <text fg={colorMuted}>{` ${formatNum(s.estTokens)}*`}</text>
+                  </box>
                 )}
               </For>
               <Show when={data_().skillSizes.length > 8}>
