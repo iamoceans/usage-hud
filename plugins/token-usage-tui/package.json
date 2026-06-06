@@ -1,0 +1,16 @@
+{
+  "name": "@usage-hud/token-usage-tui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Real-time token consumption sidebar for opencode TUI",
+  "keywords": ["opencode", "tui", "plugin", "tokens", "usage"],
+  "license": "MIT",
+  "dependencies": {
+    "@opencode-ai/plugin": "latest",
+    "@opencode-ai/sdk": "latest",
+    "@opentui/core": "latest",
+    "@opentui/solid": "latest",
+    "solid-js": "latest"
+  }
+}
