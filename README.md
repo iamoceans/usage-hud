@@ -35,7 +35,7 @@ While a session is running, the right sidebar shows something like:
 ### 1. 克隆仓库 / Clone the repo
 
 ```bash
-git clone https://github.com/YOUR-USERNAME/usage-hud.git
+git clone https://github.com/iamoceans/usage-hud.git
 cd usage-hud
 ```
 
