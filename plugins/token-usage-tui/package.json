@@ -6,11 +6,24 @@
   "description": "Real-time token consumption sidebar for opencode TUI",
   "keywords": ["opencode", "tui", "plugin", "tokens", "usage"],
   "license": "MIT",
+  "scripts": {
+    "build": "node ./build.mjs",
+    "test": "vitest run"
+  },
   "dependencies": {
     "@opencode-ai/plugin": "latest",
     "@opencode-ai/sdk": "latest",
     "@opentui/core": "latest",
     "@opentui/solid": "latest",
     "solid-js": "latest"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.28.0",
+    "@babel/preset-typescript": "^7.27.1",
+    "@types/node": "^24.9.1",
+    "babel-preset-solid": "^1.9.12",
+    "esbuild": "^0.25.10",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
   }
 }

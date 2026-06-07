@@ -4,7 +4,7 @@ import { createMemo, createSignal, onCleanup, Show, For } from "solid-js"
 import type { Message, Part } from "@opencode-ai/sdk/v2"
 import type { TuiTheme } from "@opencode-ai/plugin/tui"
 import { formatNum, topTools, bucketTotal, type TokenBucket } from "../aggregator"
-import { buildSkillSectionModel } from "../skill-usage"
+import { formatSkillUsageDisplay } from "../skill-usage"
 import { createAggregateReader, createSkillUsageReader } from "../runtime-cache"
 
 export type TokenSidebarProps = {
@@ -23,7 +23,7 @@ export function TokenSidebar(props: TokenSidebarProps) {
 
   const refreshMs = props.refreshMs ?? 750
   const readAggregate = createAggregateReader(props.getMessages, props.getParts)
-  const readSkillUsage = createSkillUsageReader(props.worktree)
+  const readSkillUsage = createSkillUsageReader(props.worktree, props.getMessages, props.getParts)
 
   const data = createMemo(() => {
     tick()
@@ -34,9 +34,9 @@ export function TokenSidebar(props: TokenSidebarProps) {
     }
   })
 
-  const skillSection = createMemo(() => {
+  const rawSkillUsage = createMemo(() => {
     tick()
-    return buildSkillSectionModel(readSkillUsage(props.sessionId))
+    return readSkillUsage(props.sessionId)
   })
 
   const t = props.theme.current
@@ -44,17 +44,15 @@ export function TokenSidebar(props: TokenSidebarProps) {
   const colorMuted = t.textMuted
   const colorAccent = t.accent
   const colorSuccess = t.success
-  const colorWarning = t.warning
 
   return (
     <Show when={data()} fallback={<text fg={colorMuted}>loading token usage…</text>}>
       {(d) => {
-        const section = skillSection()
+        const skillUsage = () => rawSkillUsage()
         const tot = () => d().total
         const tools = () => topTools(d().byTool, 5)
         const totalAll = () => bucketTotal(tot())
         const data_ = () => d()
-
         return (
           <box flexDirection="column" paddingLeft={1} paddingRight={1}>
             {/* Header */}
@@ -93,21 +91,21 @@ export function TokenSidebar(props: TokenSidebarProps) {
             <text>{" "}</text>
 
             {/* Skills section */}
-            <text fg={colorAccent}>{section.title.padEnd(40, " ")}</text>
+            <text fg={colorAccent}>{"─ Skills Used ─".padEnd(40, " ")}</text>
             <Show
-              when={section.rows.length > 0}
-              fallback={<text fg={colorMuted}>{section.emptyText}</text>}
+              when={skillUsage().length > 0}
+              fallback={<text fg={colorMuted}>{"  (no skill usage detected yet)"}</text>}
             >
-              <For each={section.rows}>
+              <For each={skillUsage().slice(0, 8)}>
                 {(s) => (
                   <box flexDirection="row">
                     <text fg={colorText}>{`  • ${s.name.slice(0, 22)}`.padEnd(22, " ")}</text>
-                    <text fg={colorMuted}>{` ${s.display}`}</text>
+                    <text fg={colorMuted}>{` ${formatSkillUsageDisplay(s)}`}</text>
                   </box>
                 )}
               </For>
-              <Show when={section.total > 8}>
-                <text fg={colorMuted}>{`  … +${section.total - 8} more`}</text>
+              <Show when={skillUsage().length > 8}>
+                <text fg={colorMuted}>{`  … +${skillUsage().length - 8} more`}</text>
               </Show>
             </Show>
 

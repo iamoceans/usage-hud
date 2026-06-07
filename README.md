@@ -13,30 +13,22 @@ While a session is running, the right sidebar shows something like:
   ├─ out                 82.0K
   ├─ cache.r            7.08M
   └─ cache.w                0
-  💰 Cost             $0.0000
   🔄 Steps                 80
   📨 Msgs                  91
 
 ─ By Tool (top 5) ─
-  tool:webfetch        56.1K↓
-  tool:websearch       27.4K↓
-  tool:read            12.0K↓
-  tool:bash             5.7K↓
-  tool:skill            3.4K↓
+  tool:bash             6.6K↓
+  tool:skill            3.6K↓
+  tool:read             2.2K↓
 
-─ Skills Loaded (est) ─
-  • lark-base         110.1K*
-  • guizang-ppt-skill  87.8K*
-  • lark-slides        57.3K*
-  …
-  * = static size (chars/4)
+─ Skills Used ─
+  • aihot             170 tok / 1x
+
+# when no sidecar estimate exists yet
+  • aihot               0 tok / 1x
   (refresh: 750ms)
 ```
 
-灵感来自 [claude-hud](https://github.com/jarrodwatts/claude-hud) (Claude Code) 和 [opencodeBar](https://github.com/Icicno/opencodeBar) / [OCometixLine](https://github.com/anomalyco/opencodeBar) (opencode)。
-Inspired by [claude-hud](https://github.com/jarrodwatts/claude-hud) (Claude Code) and [opencodeBar](https://github.com/Icicno/opencodeBar) / [OCometixLine](https://github.com/anomalyco/opencodeBar) (opencode).
-
----
 
 ## 安装 / Installation
 
@@ -92,22 +84,43 @@ Open any session, and the right sidebar will show the "─ Token Usage ─" bloc
 
 | 维度 / Dimension | 数据源 / Data source | 精度 / Accuracy |
 |---|---|---|
-| **Total (in/out/cache.r/cache.w/cost/steps)** | `state.session.messages(id)` 累加每个 `AssistantMessage.tokens` (LLM provider 报告) | ✅ **精确 / Exact** |
-| **By Tool (粗略 / coarse)** | 同上,按 `ToolPart.tool` 分类;input tokens 按 tool output 字符数 / 4 估算 | ⚠️ **粗略 / Coarse** (input 是一次性结算,按 output 字符数比例分摊) |
-| **Skills (est / 估计)** | 启动时扫 `.opencode/skills/` 等目录,统计每个 skill 的文本文件大小 / 4 | ⚠️ **只能显示静态大小,无法按 token 切分** (plugin 层看不到 system prompt 内部组成) |
+| **Total (in/out/cache.r/cache.w/steps)** | `state.session.messages(id)` 累加每个 `AssistantMessage.tokens` (LLM provider 报告) | ✅ **精确 / Exact** |
+| **By Tool (粗略 / coarse)** | 同上,按 `ToolPart.tool` 分类;`input + cacheRead` 按 tool output 文本长度 / 4 估算 | ⚠️ **粗略 / Coarse** (provider 只给整轮 token,这里只能按输出文本比例分摊) |
+| **Skills Used (推荐 / recommended)** | 当前会话里的真实 `tool:skill` 调用 + 可选 `server.ts` sidecar 提供的每个 skill 单次 token 估算 | ⚠️ **半精确 / Semi-precise**: 调用次数是真实值,`tok` 仍是按 sidecar `chars/4` 推出来的估算值 |
 
 > **关于 Skill 维度** / **About the Skill dimension**:
-> LLM 提供商每次调用只返回一个 `input` token 计数;opencode 服务端组装 system prompt 时不公开每个 skill 贡献了多少。
-> The LLM provider reports only one `input` token count per turn; opencode assembles the system prompt server-side and never tells us how much each skill contributed.
-> 这个插件只能显示 skill 的**静态内容大小**(chars/4),不能显示实际每轮的 token 消耗。
-> This plugin can only show the **static content size** of each skill (chars/4), not per-turn token consumption.
-> 适合用来**精简 skill 集合** — 如果某个 skill 8K tokens 但你很少用,可以移出自动加载路径。
-> Useful for **pruning your skill set** — if a skill is 8K tokens but you rarely use it, move it out of the auto-loaded path.
+> `Skills Used` 现在只统计当前 session 内真实发起过的 `tool:skill` 调用,格式为 `170 tok / 1x`。
+> `Skills Used` now counts only real `tool:skill` calls from the current session, formatted as `170 tok / 1x`.
+> 其中 `x` 是真实调用次数;`tok` 需要配合可选 `plugins/token-usage-tui/src/server.ts` sidecar 插件,用每轮 system prompt 中 `<skill>` 块的 `chars/4` 做单次估算后累计。
+> Here `x` is the real call count; `tok` requires the optional `plugins/token-usage-tui/src/server.ts` sidecar plugin and is estimated from each skill block's `chars/4` footprint in the system prompt.
+> 如果 sidecar 暂时不存在或读取失败,UI 仍会保留真实 skill 调用,只是 token 估算会降级为 `0 tok / Nx`。
+> If the sidecar is missing or temporarily unreadable, the UI still shows real skill calls and simply degrades the estimate to `0 tok / Nx`.
 
-如需真正的按 turn / 按 skill 的 token 分解,只有两条路:
-For real per-turn, per-skill token breakdowns, there are only two paths:
-1. 修改 opencode 的 `system-prompt.ts` 让它输出 per-skill 分解 (Patch opencode's `system-prompt.ts`)
-2. 在网络层代理 LLM HTTP 调用 (Helicone / OpenLLMetry),解析 system prompt 组件 (Proxy the LLM HTTP call at the network layer and parse system prompt components)
+### 可选: 安装 server sidecar 插件 / Optional: install the server sidecar plugin
+
+把 `plugins/token-usage-tui/src/server.ts` 复制到:
+Copy `plugins/token-usage-tui/src/server.ts` to:
+
+```text
+<worktree>/.opencode/plugins/token-usage-server.ts
+```
+
+或全局目录:
+Or the global plugin directory:
+
+```text
+~/.config/opencode/plugins/token-usage-server.ts
+```
+
+server 插件会把每轮 skill 使用情况写到:
+The server plugin writes per-turn skill usage to:
+
+```text
+.opencode/.cache/token-usage-tui/sidecar/<session-id>.jsonl
+```
+
+出于安全原因,文件名里的 `sessionId` 会先做净化,避免路径逃逸。
+For safety, the `sessionId` in the filename is sanitized before writing, which prevents path traversal.
 
 ---
 
@@ -123,10 +136,23 @@ createSignal + setInterval(750ms)  触发重渲染  / trigger re-render
 JSX → sidebar_content slot
        ↓
 @opentui/solid  渲染  / render
+
+optional server hook:
+experimental.chat.system.transform
+       ↓
+parse <skill> blocks
+       ↓
+.opencode/.cache/token-usage-tui/sidecar/*.jsonl
+       ↓
+TokenSidebar + session parts → real tool:skill calls
+       ↓
+merge call counts with sidecar estimates
+       ↓
+Skills Used
 ```
 
-**无文件持久化、无后台进程** — 跟 claude-hud 同款设计哲学。
-**No file persistence, no background process** — same design philosophy as claude-hud.
+默认 TUI 侧仍然是**无后台进程**;只有安装可选 server 插件时才会生成 sidecar 文件。
+The TUI remains **background-process free** by default; sidecar files are only generated when the optional server plugin is installed.
 
 ---
 
@@ -165,6 +191,13 @@ opencode --log-level DEBUG
 
 日志位置 / Log location: `~/.local/share/opencode/log/`
 
+如果启用了 server sidecar,也可以直接检查:
+If the server sidecar is enabled, you can also inspect:
+
+```text
+.opencode/.cache/token-usage-tui/sidecar/
+```
+
 成功会看到 / On success you'll see:
 ```
 token-usage-tui initialized
@@ -182,7 +215,16 @@ failed to load plugin
 
 - **跨 session 不累计** / **No cross-session accumulation**: 当前 sidebar 只显示当前 session 的数据。 / The sidebar only shows the current session's data.
 - **macOS 不支持相对路径** / **macOS does not support relative paths** in `tui.json` (opencodeBar 文档确认 / confirmed by opencodeBar docs);用 `file://` + 绝对路径。 / Use `file://` + absolute path.
-- **Skill 维度无法精确切分** / **Skill dimension cannot be split precisely** without modifying opencode.
+- **By Tool 仍是估算** / **By Tool is still estimated**: 即便修复了 `cacheRead` 和结构化输出统计,provider 仍不会返回逐 tool token。 / Even with the fixes, providers still do not return per-tool token counts.
+- **Skills Used 的调用次数是真实的,`tok` 仍是估算** / **Skills Used call counts are real, but `tok` is still estimated**: 调用次数来自真实 `tool:skill` parts; token 仍依赖 sidecar 中 `<skill>` 块的 `chars/4` 估算,不是 provider 级精确账单。 / Call counts come from real `tool:skill` parts; token values still rely on sidecar `chars/4` estimates rather than provider-billed per-skill tokens.
+- **sidecar 缺失时会降级到 `0 tok / Nx`** / **Missing sidecar degrades to `0 tok / Nx`**: 为避免把真实调用整块吞掉,没有 sidecar 或读取失败时仍显示真实 skill 调用次数。 / To avoid hiding real calls, the UI still shows real skill invocation counts when the sidecar is missing or unreadable.
+
+## 测试 / Testing
+
+```bash
+cd plugins/token-usage-tui
+npm test
+```
 
 ## 路线图 / Roadmap
 
