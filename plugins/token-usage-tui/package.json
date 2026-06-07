@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Real-time token consumption sidebar for opencode TUI",
   "keywords": ["opencode", "tui", "plugin", "tokens", "usage"],
-  "license": "MIT",
+  "license": "Apache-2.0",
   "scripts": {
     "build": "node ./build.mjs",
     "test": "vitest run"

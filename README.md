@@ -236,4 +236,4 @@ npm test
 
 ## 协议 / License
 
-MIT
+Apache-2.0
