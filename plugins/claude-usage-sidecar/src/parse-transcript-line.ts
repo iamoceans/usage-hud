@@ -242,14 +242,23 @@ export const parseTranscriptLine = (
     if (block.type === "tool_use" && typeof block.id === "string" && typeof block.name === "string") {
       if (block.name === "TodoWrite") {
         const input = block.input
-        const todos =
-          isRecord(input) && Array.isArray(input.todos)
-            ? input.todos
-                .map(normalizeTodoItem)
-                .filter((todo): todo is TodoItem => todo !== null)
-            : null
+        const rawTodos =
+          isRecord(input) && Array.isArray(input.todos) ? input.todos : null
 
-        if (todos !== null) {
+        if (rawTodos !== null) {
+          const todos = rawTodos
+            .map(normalizeTodoItem)
+            .filter((todo): todo is TodoItem => todo !== null)
+
+          if (rawTodos.length > 0 && todos.length === 0) {
+            debugSkip(
+              debug,
+              "Skipped TodoWrite because todos array contained no valid todo items",
+              line,
+            )
+            continue
+          }
+
           events.push({
             sessionId,
             timestamp,

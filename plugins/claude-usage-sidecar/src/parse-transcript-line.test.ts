@@ -136,6 +136,37 @@ describe("parseTranscriptLine", () => {
     ])
   })
 
+  it("does not treat a non-empty invalid todos array as a clear-all replace", () => {
+    const debugMessages: string[] = []
+    const line = JSON.stringify({
+      sessionId: "session-1",
+      timestamp: "2026-06-08T12:00:02.750Z",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: "todo-invalid",
+            name: "TodoWrite",
+            input: {
+              todos: [null, {}, { content: "" }, { content: "   " }],
+            },
+          },
+        ],
+      },
+    })
+
+    expect(
+      parseTranscriptLine(line, {
+        debug: (message) => {
+          debugMessages.push(message)
+        },
+      }),
+    ).toEqual([])
+    expect(debugMessages).toContain(
+      "Skipped TodoWrite because todos array contained no valid todo items",
+    )
+  })
+
   it("returns no events when sessionId or timestamp are not non-empty strings", () => {
     const missingSession = JSON.stringify({
       sessionId: 123,
