@@ -71,6 +71,14 @@ const getDebug = (
 ): ((message: string, context?: ParseTranscriptLineDebugContext) => void) | undefined =>
   options?.debug ?? options?.logger?.debug
 
+const debugSkip = (
+  debug: ((message: string, context?: ParseTranscriptLineDebugContext) => void) | undefined,
+  message: string,
+  line: string,
+): void => {
+  debug?.(message, { line })
+}
+
 const readTodoOperation = (value: unknown): TodoOperation | null => {
   if (value === "add" || value === "update" || value === "remove") {
     return value
@@ -204,13 +212,20 @@ export const parseTranscriptLine = (
   }
 
   if (!isRecord(entry)) {
+    debugSkip(debug, "Skipped transcript line because parsed JSON is not an object", line)
     return []
   }
 
   const sessionId = getNonEmptyString(entry.sessionId)
   const timestamp = getNonEmptyString(entry.timestamp)
 
-  if (sessionId === null || timestamp === null) {
+  if (sessionId === null) {
+    debugSkip(debug, "Skipped transcript line because sessionId is missing or blank", line)
+    return []
+  }
+
+  if (timestamp === null) {
+    debugSkip(debug, "Skipped transcript line because timestamp is missing or blank", line)
     return []
   }
 
@@ -234,7 +249,7 @@ export const parseTranscriptLine = (
                 .filter((todo): todo is TodoItem => todo !== null)
             : null
 
-        if (todos !== null && todos.length > 0) {
+        if (todos !== null) {
           events.push({
             sessionId,
             timestamp,

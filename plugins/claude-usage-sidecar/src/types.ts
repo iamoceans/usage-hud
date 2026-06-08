@@ -45,9 +45,15 @@ export type NormalizedEvent =
       sessionId: string
       timestamp: string
       eventType: "todo-update"
-      operation: TodoOperation
-      todo?: TodoItem
-      targetContent?: string
+      operation: "remove"
+      targetContent: string
+    }
+  | {
+      sessionId: string
+      timestamp: string
+      eventType: "todo-update"
+      operation: Exclude<TodoOperation, "remove">
+      todo: TodoItem
     }
   | {
       sessionId: string

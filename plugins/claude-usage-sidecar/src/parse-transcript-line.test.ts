@@ -108,6 +108,34 @@ describe("parseTranscriptLine", () => {
     ])
   })
 
+  it("emits todo-replace for TodoWrite with an empty todos array", () => {
+    const line = JSON.stringify({
+      sessionId: "session-1",
+      timestamp: "2026-06-08T12:00:02.500Z",
+      message: {
+        content: [
+          {
+            type: "tool_use",
+            id: "todo-empty",
+            name: "TodoWrite",
+            input: {
+              todos: [],
+            },
+          },
+        ],
+      },
+    })
+
+    expect(parseTranscriptLine(line)).toEqual([
+      {
+        sessionId: "session-1",
+        timestamp: "2026-06-08T12:00:02.500Z",
+        eventType: "todo-replace",
+        todos: [],
+      },
+    ])
+  })
+
   it("returns no events when sessionId or timestamp are not non-empty strings", () => {
     const missingSession = JSON.stringify({
       sessionId: 123,
@@ -215,6 +243,67 @@ describe("parseTranscriptLine", () => {
       {
         message: "Failed to parse transcript line",
         line: "{not json}",
+      },
+    ])
+  })
+
+  it("logs structurally invalid transcript entries through the optional debug callback", () => {
+    const debugCalls: Array<{ message: string; line: string }> = []
+    const nonObjectLine = JSON.stringify(["not", "an", "object"])
+    const invalidSessionLine = JSON.stringify({
+      sessionId: "   ",
+      timestamp: "2026-06-08T12:00:06.500Z",
+      message: { content: [] },
+    })
+    const invalidTimestampLine = JSON.stringify({
+      sessionId: "session-1",
+      timestamp: 123,
+      message: { content: [] },
+    })
+
+    expect(
+      parseTranscriptLine(nonObjectLine, {
+        debug: (message, context) => {
+          debugCalls.push({
+            message,
+            line: String(context?.line ?? ""),
+          })
+        },
+      }),
+    ).toEqual([])
+    expect(
+      parseTranscriptLine(invalidSessionLine, {
+        debug: (message, context) => {
+          debugCalls.push({
+            message,
+            line: String(context?.line ?? ""),
+          })
+        },
+      }),
+    ).toEqual([])
+    expect(
+      parseTranscriptLine(invalidTimestampLine, {
+        debug: (message, context) => {
+          debugCalls.push({
+            message,
+            line: String(context?.line ?? ""),
+          })
+        },
+      }),
+    ).toEqual([])
+
+    expect(debugCalls).toEqual([
+      {
+        message: "Skipped transcript line because parsed JSON is not an object",
+        line: nonObjectLine,
+      },
+      {
+        message: "Skipped transcript line because sessionId is missing or blank",
+        line: invalidSessionLine,
+      },
+      {
+        message: "Skipped transcript line because timestamp is missing or blank",
+        line: invalidTimestampLine,
       },
     ])
   })
