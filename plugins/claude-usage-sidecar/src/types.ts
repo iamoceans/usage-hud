@@ -19,6 +19,62 @@ export type TodoItem = {
 
 export type TodoOperation = "add" | "update" | "remove"
 
+export type ToolCounter = {
+  calls: number
+  completed: number
+  errors: number
+  running: number
+}
+
+export type SessionAgentState = {
+  id: string
+  type: string
+  description?: string
+  status: "running" | "completed" | "error"
+  startTime: string
+  endTime?: string
+}
+
+export type SessionTodoState = {
+  total: number
+  completed: number
+  inProgress: number
+  items: TodoItem[]
+}
+
+export type SessionUsageState = {
+  available: boolean
+}
+
+export type SessionLimitations = {
+  perToolTokens: "unavailable"
+  perSkillTokens: "unavailable"
+}
+
+export type SessionSnapshot = {
+  sessionId: string
+  startedAt: string | null
+  lastActivityAt: string | null
+  sourceFiles: string[]
+  tools: Record<string, ToolCounter>
+  skills: Record<string, ToolCounter>
+  agents: SessionAgentState[]
+  todos: SessionTodoState
+  usage: SessionUsageState
+  limitations: SessionLimitations
+}
+
+export type SessionRuntimeState = SessionSnapshot & {
+  openToolCalls: Record<
+    string,
+    {
+      toolName: string
+      startedAt: string
+      skillName?: string
+    }
+  >
+}
+
 export type NormalizedEvent =
   | {
       sessionId: string
