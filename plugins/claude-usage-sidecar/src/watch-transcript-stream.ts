@@ -1,4 +1,10 @@
-import { readFileSync, statSync, type Stats } from "node:fs"
+import {
+  closeSync,
+  openSync,
+  readSync,
+  statSync,
+  type Stats,
+} from "node:fs"
 
 export type TranscriptCursor = {
   offset: number
@@ -10,18 +16,21 @@ export type TranscriptCursor = {
 
 export type TranscriptFileAccess = {
   statSync: typeof statSync
-  readFileSync: typeof readFileSync
+  openSync: typeof openSync
+  readSync: typeof readSync
+  closeSync: typeof closeSync
 }
 
 export type TranscriptDelta = {
   lines: string[]
-  nextOffset: number
   cursor: TranscriptCursor
 }
 
 const DEFAULT_FILE_ACCESS: TranscriptFileAccess = {
   statSync,
-  readFileSync,
+  openSync,
+  readSync,
+  closeSync,
 }
 
 const createCursor = (
@@ -38,23 +47,69 @@ const createCursor = (
   tailFingerprint,
 })
 
-const normalizeCursor = (cursorOrOffset: number | TranscriptCursor): TranscriptCursor =>
-  typeof cursorOrOffset === "number" ? createCursor(cursorOrOffset) : cursorOrOffset
+export const createInitialTranscriptCursor = (): TranscriptCursor => createCursor(0)
 
 const getFileIdentity = (fileStat: Stats): string => `${fileStat.dev}:${fileStat.ino}:${fileStat.birthtimeMs}`
 
-const getTailFingerprint = (buffer: Buffer, endOffset: number): string => {
+const readRange = (
+  filePath: string,
+  startOffset: number,
+  length: number,
+  fileAccess: TranscriptFileAccess,
+): Buffer => {
+  if (length <= 0) {
+    return Buffer.alloc(0)
+  }
+
+  const fileDescriptor = fileAccess.openSync(filePath, "r")
+
+  try {
+    const buffer = Buffer.alloc(length)
+    let bytesReadTotal = 0
+
+    while (bytesReadTotal < length) {
+      const bytesRead = fileAccess.readSync(
+        fileDescriptor,
+        buffer,
+        bytesReadTotal,
+        length - bytesReadTotal,
+        startOffset + bytesReadTotal,
+      )
+
+      if (bytesRead === 0) {
+        return buffer.subarray(0, bytesReadTotal)
+      }
+
+      bytesReadTotal += bytesRead
+    }
+
+    return buffer
+  } finally {
+    fileAccess.closeSync(fileDescriptor)
+  }
+}
+
+const readTailFingerprint = (
+  filePath: string,
+  endOffset: number,
+  fileAccess: TranscriptFileAccess,
+): string => {
+  if (endOffset <= 0) {
+    return ""
+  }
+
   const tailStart = Math.max(0, endOffset - 64)
-  return buffer.subarray(tailStart, endOffset).toString("base64")
+  return readRange(filePath, tailStart, endOffset - tailStart, fileAccess).toString("base64")
 }
 
 const isResetFile = (
+  filePath: string,
   cursor: TranscriptCursor,
   fileStat: Stats,
-  buffer: Buffer,
   fileIdentity: string,
+  fileAccess: TranscriptFileAccess,
 ): boolean => {
-  if (cursor.offset > buffer.length || cursor.size > buffer.length) {
+  if (cursor.offset > fileStat.size || cursor.size > fileStat.size) {
     return true
   }
 
@@ -62,75 +117,67 @@ const isResetFile = (
     return true
   }
 
-  if (cursor.lastModifiedMs === 0 || cursor.size !== buffer.length || cursor.lastModifiedMs === fileStat.mtimeMs) {
+  if (cursor.lastModifiedMs === 0 || cursor.lastModifiedMs === fileStat.mtimeMs) {
     return false
   }
 
-  return cursor.tailFingerprint !== getTailFingerprint(buffer, Math.min(cursor.offset, buffer.length))
+  return cursor.tailFingerprint !== readTailFingerprint(filePath, cursor.offset, fileAccess)
 }
 
 const emptyDelta = (cursor: TranscriptCursor): TranscriptDelta => ({
   lines: [],
-  nextOffset: cursor.offset,
   cursor,
 })
 
 export const readTranscriptDelta = (
   filePath: string,
-  cursorOrOffset: number | TranscriptCursor,
+  cursor: TranscriptCursor,
   fileAccess: TranscriptFileAccess = DEFAULT_FILE_ACCESS,
 ): TranscriptDelta => {
-  const previousCursor = normalizeCursor(cursorOrOffset)
   let fileStat: Stats
 
   try {
     fileStat = fileAccess.statSync(filePath)
   } catch {
-    return emptyDelta(previousCursor)
-  }
-
-  let buffer: Buffer
-
-  try {
-    buffer = fileAccess.readFileSync(filePath)
-  } catch {
-    return emptyDelta(previousCursor)
-  }
-
-  const fileIdentity = getFileIdentity(fileStat)
-  const startOffset = isResetFile(previousCursor, fileStat, buffer, fileIdentity) ? 0 : previousCursor.offset
-  const chunk = buffer.subarray(startOffset).toString("utf8")
-  const lastNewlineIndex = chunk.lastIndexOf("\n")
-
-  if (lastNewlineIndex < 0) {
-    const cursor = createCursor(
-      startOffset,
-      buffer.length,
-      fileStat.mtimeMs,
-      fileIdentity,
-      getTailFingerprint(buffer, startOffset),
-    )
-
     return emptyDelta(cursor)
   }
 
-  const consumedChunk = chunk.slice(0, lastNewlineIndex + 1)
-  const nextOffset = startOffset + Buffer.byteLength(consumedChunk)
-  const lines = consumedChunk
-    .slice(0, -1)
-    .split("\n")
-    .filter((line) => line.length > 0)
-  const cursor = createCursor(
-    nextOffset,
-    buffer.length,
-    fileStat.mtimeMs,
-    fileIdentity,
-    getTailFingerprint(buffer, nextOffset),
-  )
+  try {
+    const fileIdentity = getFileIdentity(fileStat)
+    const startOffset = isResetFile(filePath, cursor, fileStat, fileIdentity, fileAccess) ? 0 : cursor.offset
+    const chunk = readRange(filePath, startOffset, fileStat.size - startOffset, fileAccess).toString("utf8")
+    const lastNewlineIndex = chunk.lastIndexOf("\n")
 
-  return {
-    lines,
-    nextOffset,
-    cursor,
+    if (lastNewlineIndex < 0) {
+      return emptyDelta(
+        createCursor(
+          startOffset,
+          fileStat.size,
+          fileStat.mtimeMs,
+          fileIdentity,
+          startOffset === cursor.offset ? cursor.tailFingerprint : "",
+        ),
+      )
+    }
+
+    const consumedChunk = chunk.slice(0, lastNewlineIndex + 1)
+    const nextOffset = startOffset + Buffer.byteLength(consumedChunk)
+    const lines = consumedChunk
+      .slice(0, -1)
+      .split("\n")
+      .filter((line) => line.length > 0)
+
+    return {
+      lines,
+      cursor: createCursor(
+        nextOffset,
+        fileStat.size,
+        fileStat.mtimeMs,
+        fileIdentity,
+        readTailFingerprint(filePath, nextOffset, fileAccess),
+      ),
+    }
+  } catch {
+    return emptyDelta(cursor)
   }
 }
