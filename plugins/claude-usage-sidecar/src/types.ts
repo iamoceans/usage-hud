@@ -17,6 +17,8 @@ export type TodoItem = {
   status: TodoStatus
 }
 
+export type TodoOperation = "add" | "update" | "remove"
+
 export type NormalizedEvent =
   | {
       sessionId: string
@@ -38,4 +40,32 @@ export type NormalizedEvent =
       timestamp: string
       eventType: "todo-replace"
       todos: TodoItem[]
+    }
+  | {
+      sessionId: string
+      timestamp: string
+      eventType: "todo-update"
+      operation: TodoOperation
+      todo?: TodoItem
+      targetContent?: string
+    }
+  | {
+      sessionId: string
+      timestamp: string
+      eventType: "hook-success"
+      hookEventName?: string
+      attachment: Record<string, unknown>
+    }
+  | {
+      sessionId: string
+      timestamp: string
+      eventType: "hook-additional-context"
+      attachment: Record<string, unknown>
+    }
+  | {
+      sessionId: string
+      timestamp: string
+      eventType: "skill-listing"
+      skills: string[]
+      attachment: Record<string, unknown>
     }
