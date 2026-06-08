@@ -3,7 +3,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSy
 import * as os from "node:os"
 import * as path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import { createInitialTranscriptCursor, readTranscriptDelta } from "./watch-transcript-stream.js"
+import { readTranscriptDelta } from "./watch-transcript-stream.js"
 
 const tempRoots: string[] = []
 
@@ -22,13 +22,13 @@ describe("readTranscriptDelta", () => {
     mkdirSync(path.dirname(file), { recursive: true })
     writeFileSync(file, '{"a":1}\n')
 
-    const first = readTranscriptDelta(file, createInitialTranscriptCursor())
+    const first = readTranscriptDelta(file, 0)
     appendFileSync(file, '{"b":2}\n')
-    const second = readTranscriptDelta(file, first.cursor)
+    const second = readTranscriptDelta(file, first.nextOffset)
 
     expect(first.lines).toEqual(['{"a":1}'])
     expect(second.lines).toEqual(['{"b":2}'])
-    expect(second.cursor.offset).toBe(Buffer.byteLength('{"a":1}\n{"b":2}\n'))
+    expect(second.nextOffset).toBe(Buffer.byteLength('{"a":1}\n{"b":2}\n'))
   })
 
   it("does not return an unterminated trailing line or advance past it", () => {
@@ -39,14 +39,14 @@ describe("readTranscriptDelta", () => {
     mkdirSync(path.dirname(file), { recursive: true })
     writeFileSync(file, '{"a":1}\n{"b":2}')
 
-    const first = readTranscriptDelta(file, createInitialTranscriptCursor())
+    const first = readTranscriptDelta(file, 0)
 
     expect(first.lines).toEqual(['{"a":1}'])
-    expect(first.cursor.offset).toBe(Buffer.byteLength('{"a":1}\n'))
+    expect(first.nextOffset).toBe(Buffer.byteLength('{"a":1}\n'))
 
     appendFileSync(file, '\n{"c":3}\n')
 
-    const second = readTranscriptDelta(file, first.cursor)
+    const second = readTranscriptDelta(file, first.nextOffset)
 
     expect(second.lines).toEqual(['{"b":2}', '{"c":3}'])
   })
@@ -59,16 +59,16 @@ describe("readTranscriptDelta", () => {
     mkdirSync(path.dirname(file), { recursive: true })
     writeFileSync(file, '{"a":1}\n')
 
-    const first = readTranscriptDelta(file, createInitialTranscriptCursor())
-    const restoredCursor = JSON.parse(JSON.stringify(first.cursor))
+    const first = readTranscriptDelta(file, 0)
+    const restoredOffset = JSON.parse(JSON.stringify(first.nextOffset))
 
     writeFileSync(file, '{"b":2}\n')
     utimesSync(file, new Date(), new Date(Date.now() + 1000))
 
-    const second = readTranscriptDelta(file, restoredCursor)
+    const second = readTranscriptDelta(file, restoredOffset)
 
     expect(second.lines).toEqual(['{"b":2}'])
-    expect(second.cursor.offset).toBe(Buffer.byteLength('{"b":2}\n'))
+    expect(second.nextOffset).toBe(Buffer.byteLength('{"b":2}\n'))
   })
 
   it("returns an empty delta when the file is temporarily unavailable during stat", () => {
@@ -79,14 +79,14 @@ describe("readTranscriptDelta", () => {
     mkdirSync(path.dirname(file), { recursive: true })
     writeFileSync(file, '{"a":1}\n')
 
-    const first = readTranscriptDelta(file, createInitialTranscriptCursor())
+    const first = readTranscriptDelta(file, 0)
 
     rmSync(file)
 
-    const second = readTranscriptDelta(file, first.cursor)
+    const second = readTranscriptDelta(file, first.nextOffset)
 
     expect(second.lines).toEqual([])
-    expect(second.cursor).toEqual(first.cursor)
+    expect(second.nextOffset).toBe(first.nextOffset)
   })
 
   it("reads appended bytes from the current offset instead of re-reading the whole file", () => {
@@ -100,10 +100,10 @@ describe("readTranscriptDelta", () => {
     mkdirSync(path.dirname(file), { recursive: true })
     writeFileSync(file, firstLine)
 
-    const first = readTranscriptDelta(file, createInitialTranscriptCursor())
+    const first = readTranscriptDelta(file, 0)
     appendFileSync(file, secondLine)
 
-    const second = readTranscriptDelta(file, first.cursor, {
+    const second = readTranscriptDelta(file, first.nextOffset, {
       statSync: fs.statSync,
       openSync: fs.openSync,
       readSync: (fd, buffer, offset, length, position) => {
@@ -117,9 +117,9 @@ describe("readTranscriptDelta", () => {
     })
 
     expect(second.lines).toEqual([secondLine.trimEnd()])
-    expect(readPositions).toContain(first.cursor.offset)
+    expect(readPositions).toContain(first.nextOffset)
     expect(readPositions).not.toContain(0)
-    expect(second.cursor.offset).toBe(firstLine.length + secondLine.length)
+    expect(second.nextOffset).toBe(firstLine.length + secondLine.length)
   })
 
   it("returns an empty delta when reading the file fails temporarily", () => {
@@ -129,8 +129,8 @@ describe("readTranscriptDelta", () => {
     mkdirSync(path.dirname(file), { recursive: true })
     writeFileSync(file, '{"a":1}\n')
 
-    const first = readTranscriptDelta(file, createInitialTranscriptCursor())
-    const second = readTranscriptDelta(file, first.cursor, {
+    const first = readTranscriptDelta(file, 0)
+    const second = readTranscriptDelta(file, first.nextOffset, {
       statSync: fs.statSync,
       openSync: fs.openSync,
       readSync: () => {
@@ -140,6 +140,6 @@ describe("readTranscriptDelta", () => {
     })
 
     expect(second.lines).toEqual([])
-    expect(second.cursor).toEqual(first.cursor)
+    expect(second.nextOffset).toBe(first.nextOffset)
   })
 })

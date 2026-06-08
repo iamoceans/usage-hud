@@ -6,7 +6,7 @@ import {
   type Stats,
 } from "node:fs"
 
-export type TranscriptCursor = {
+type TranscriptCursor = {
   offset: number
   size: number
   lastModifiedMs: number
@@ -14,7 +14,7 @@ export type TranscriptCursor = {
   tailFingerprint: string
 }
 
-export type TranscriptFileAccess = {
+type TranscriptFileAccess = {
   statSync: typeof statSync
   openSync: typeof openSync
   readSync: typeof readSync
@@ -23,7 +23,7 @@ export type TranscriptFileAccess = {
 
 export type TranscriptDelta = {
   lines: string[]
-  cursor: TranscriptCursor
+  nextOffset: number
 }
 
 const DEFAULT_FILE_ACCESS: TranscriptFileAccess = {
@@ -47,9 +47,8 @@ const createCursor = (
   tailFingerprint,
 })
 
-export const createInitialTranscriptCursor = (): TranscriptCursor => createCursor(0)
-
 const getFileIdentity = (fileStat: Stats): string => `${fileStat.dev}:${fileStat.ino}:${fileStat.birthtimeMs}`
+const transcriptCursorCache = new Map<string, TranscriptCursor>()
 
 const readRange = (
   filePath: string,
@@ -126,14 +125,17 @@ const isResetFile = (
 
 const emptyDelta = (cursor: TranscriptCursor): TranscriptDelta => ({
   lines: [],
-  cursor,
+  nextOffset: cursor.offset,
 })
 
 export const readTranscriptDelta = (
   filePath: string,
-  cursor: TranscriptCursor,
+  offset: number,
   fileAccess: TranscriptFileAccess = DEFAULT_FILE_ACCESS,
 ): TranscriptDelta => {
+  const cachedCursor = transcriptCursorCache.get(filePath)
+  const cursor =
+    cachedCursor != null && cachedCursor.offset === offset ? cachedCursor : createCursor(offset)
   let fileStat: Stats
 
   try {
@@ -149,15 +151,16 @@ export const readTranscriptDelta = (
     const lastNewlineIndex = chunk.lastIndexOf("\n")
 
     if (lastNewlineIndex < 0) {
-      return emptyDelta(
-        createCursor(
-          startOffset,
-          fileStat.size,
-          fileStat.mtimeMs,
-          fileIdentity,
-          startOffset === cursor.offset ? cursor.tailFingerprint : "",
-        ),
+      const nextCursor = createCursor(
+        startOffset,
+        fileStat.size,
+        fileStat.mtimeMs,
+        fileIdentity,
+        startOffset === cursor.offset ? cursor.tailFingerprint : "",
       )
+
+      transcriptCursorCache.set(filePath, nextCursor)
+      return emptyDelta(nextCursor)
     }
 
     const consumedChunk = chunk.slice(0, lastNewlineIndex + 1)
@@ -167,15 +170,20 @@ export const readTranscriptDelta = (
       .split("\n")
       .filter((line) => line.length > 0)
 
-    return {
-      lines,
-      cursor: createCursor(
+    transcriptCursorCache.set(
+      filePath,
+      createCursor(
         nextOffset,
         fileStat.size,
         fileStat.mtimeMs,
         fileIdentity,
         readTailFingerprint(filePath, nextOffset, fileAccess),
       ),
+    )
+
+    return {
+      lines,
+      nextOffset,
     }
   } catch {
     return emptyDelta(cursor)
