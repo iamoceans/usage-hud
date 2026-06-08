@@ -74,6 +74,28 @@ describe("parseTranscriptLine", () => {
     ])
   })
 
+  it("extracts tool_result error events", () => {
+    const line = JSON.stringify({
+      sessionId: "session-1",
+      timestamp: "2026-06-08T12:00:01.500Z",
+      message: {
+        content: [
+          { type: "tool_result", tool_use_id: "tool-err", is_error: true },
+        ],
+      },
+    })
+
+    expect(parseTranscriptLine(line)).toEqual([
+      {
+        sessionId: "session-1",
+        timestamp: "2026-06-08T12:00:01.500Z",
+        eventType: "tool-end",
+        toolCallId: "tool-err",
+        status: "error",
+      },
+    ])
+  })
+
   it("skips invalid todo elements instead of emitting empty tasks", () => {
     const line = JSON.stringify({
       sessionId: "session-1",
@@ -335,6 +357,47 @@ describe("parseTranscriptLine", () => {
       {
         message: "Skipped transcript line because timestamp is missing or blank",
         line: invalidTimestampLine,
+      },
+    ])
+  })
+
+  it("rejects blank tool identifiers and names with debug logging", () => {
+    const debugCalls: Array<{ message: string; line: string }> = []
+    const invalidToolLine = JSON.stringify({
+      sessionId: "session-1",
+      timestamp: "2026-06-08T12:00:06.500Z",
+      message: {
+        content: [
+          { type: "tool_use", id: "   ", name: "Read", input: {} },
+          { type: "tool_use", id: "tool-1", name: "   ", input: {} },
+          { type: "tool_result", tool_use_id: "   ", is_error: false },
+        ],
+      },
+    })
+
+    expect(
+      parseTranscriptLine(invalidToolLine, {
+        debug: (message, context) => {
+          debugCalls.push({
+            message,
+            line: String(context?.line ?? ""),
+          })
+        },
+      }),
+    ).toEqual([])
+
+    expect(debugCalls).toEqual([
+      {
+        message: "Skipped tool_use block because id is missing or blank",
+        line: invalidToolLine,
+      },
+      {
+        message: "Skipped tool_use block because name is missing or blank",
+        line: invalidToolLine,
+      },
+      {
+        message: "Skipped tool_result block because tool_use_id is missing or blank",
+        line: invalidToolLine,
       },
     ])
   })

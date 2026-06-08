@@ -79,6 +79,21 @@ const debugSkip = (
   debug?.(message, { line })
 }
 
+const getRequiredString = (
+  value: unknown,
+  debug: ((message: string, context?: ParseTranscriptLineDebugContext) => void) | undefined,
+  message: string,
+  line: string,
+): string | null => {
+  const normalized = getNonEmptyString(value)
+
+  if (normalized === null) {
+    debugSkip(debug, message, line)
+  }
+
+  return normalized
+}
+
 const readTodoOperation = (value: unknown): TodoOperation | null => {
   if (value === "add" || value === "update" || value === "remove") {
     return value
@@ -239,8 +254,25 @@ export const parseTranscriptLine = (
       continue
     }
 
-    if (block.type === "tool_use" && typeof block.id === "string" && typeof block.name === "string") {
-      if (block.name === "TodoWrite") {
+    if (block.type === "tool_use") {
+      const toolCallId = getRequiredString(
+        block.id,
+        debug,
+        "Skipped tool_use block because id is missing or blank",
+        line,
+      )
+      const toolName = getRequiredString(
+        block.name,
+        debug,
+        "Skipped tool_use block because name is missing or blank",
+        line,
+      )
+
+      if (toolCallId === null || toolName === null) {
+        continue
+      }
+
+      if (toolName === "TodoWrite") {
         const input = block.input
         const rawTodos =
           isRecord(input) && Array.isArray(input.todos) ? input.todos : null
@@ -274,8 +306,8 @@ export const parseTranscriptLine = (
         sessionId,
         timestamp,
         eventType: "tool-start",
-        toolCallId: block.id,
-        toolName: block.name,
+        toolCallId,
+        toolName,
         input: toInputRecord(block.input),
       })
       continue
@@ -288,12 +320,23 @@ export const parseTranscriptLine = (
       continue
     }
 
-    if (block.type === "tool_result" && typeof block.tool_use_id === "string") {
+    if (block.type === "tool_result") {
+      const toolCallId = getRequiredString(
+        block.tool_use_id,
+        debug,
+        "Skipped tool_result block because tool_use_id is missing or blank",
+        line,
+      )
+
+      if (toolCallId === null) {
+        continue
+      }
+
       events.push({
         sessionId,
         timestamp,
         eventType: "tool-end",
-        toolCallId: block.tool_use_id,
+        toolCallId,
         status: block.is_error === true ? "error" : "completed",
       })
     }
