@@ -79,6 +79,7 @@ export type NormalizedEvent =
   | {
       sessionId: string
       timestamp: string
+      sourceFile?: string
       eventType: "tool-start"
       toolCallId: string
       toolName: string
@@ -87,6 +88,7 @@ export type NormalizedEvent =
   | {
       sessionId: string
       timestamp: string
+      sourceFile?: string
       eventType: "tool-end"
       toolCallId: string
       status: "completed" | "error"
@@ -94,12 +96,14 @@ export type NormalizedEvent =
   | {
       sessionId: string
       timestamp: string
+      sourceFile?: string
       eventType: "todo-replace"
       todos: TodoItem[]
     }
   | {
       sessionId: string
       timestamp: string
+      sourceFile?: string
       eventType: "todo-update"
       operation: "remove"
       targetContent: string
@@ -107,6 +111,7 @@ export type NormalizedEvent =
   | {
       sessionId: string
       timestamp: string
+      sourceFile?: string
       eventType: "todo-update"
       operation: Exclude<TodoOperation, "remove">
       todo: TodoItem
@@ -114,6 +119,7 @@ export type NormalizedEvent =
   | {
       sessionId: string
       timestamp: string
+      sourceFile?: string
       eventType: "hook-success"
       hookEventName?: string
       attachment: Record<string, unknown>
@@ -121,12 +127,14 @@ export type NormalizedEvent =
   | {
       sessionId: string
       timestamp: string
+      sourceFile?: string
       eventType: "hook-additional-context"
       attachment: Record<string, unknown>
     }
   | {
       sessionId: string
       timestamp: string
+      sourceFile?: string
       eventType: "skill-listing"
       skills: string[]
       attachment: Record<string, unknown>

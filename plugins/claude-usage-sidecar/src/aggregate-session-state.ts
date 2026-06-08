@@ -104,7 +104,15 @@ const applyTodoUpdate = (
   event: Extract<NormalizedEvent, { eventType: "todo-update" }>,
 ): TodoItem[] => {
   if (event.operation === "remove") {
-    return current.filter((todo) => todo.content !== event.targetContent)
+    const indexToRemove = current.findIndex(
+      (todo) => todo.content === event.targetContent,
+    )
+
+    if (indexToRemove < 0) {
+      return current
+    }
+
+    return current.filter((_, index) => index !== indexToRemove)
   }
 
   const nextTodo = cloneTodoItem(event.todo)
@@ -157,11 +165,23 @@ export const reduceSessionEvents = (
   const next = cloneState(snapshot)
 
   for (const event of events) {
+    if (event.sessionId !== next.sessionId) {
+      continue
+    }
+
     if (next.startedAt === null) {
       next.startedAt = event.timestamp
     }
 
     next.lastActivityAt = event.timestamp
+
+    if (
+      typeof event.sourceFile === "string" &&
+      event.sourceFile.length > 0 &&
+      !next.sourceFiles.includes(event.sourceFile)
+    ) {
+      next.sourceFiles = [...next.sourceFiles, event.sourceFile]
+    }
 
     if (event.eventType === "tool-start") {
       const toolCounter = ensureCounter(next.tools, event.toolName)
