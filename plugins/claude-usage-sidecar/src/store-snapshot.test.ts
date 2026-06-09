@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
@@ -105,6 +105,46 @@ describe("store-snapshot", () => {
     })
   })
 
+  it("recovers from a malformed existing index file", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "usage-sidecar-store-"))
+    tempRoots.push(root)
+    const indexFile = path.join(root, "index.json")
+    const snapshot: SessionSnapshot = {
+      sessionId: "session-recover",
+      startedAt: null,
+      lastActivityAt: "2026-06-09T00:10:00.000Z",
+      sourceFiles: [],
+      tools: {},
+      skills: {},
+      agents: [],
+      todos: { total: 0, completed: 0, inProgress: 0, items: [] },
+      usage: { available: false },
+      limitations: {
+        perToolTokens: "unavailable",
+        perSkillTokens: "unavailable",
+      },
+    }
+
+    writeFileSync(indexFile, "{broken json", "utf8")
+
+    writeSessionSnapshot(path.join(root, "snapshots"), snapshot, {
+      indexFile,
+    })
+
+    const savedIndex = readJson<SessionIndex>(indexFile)
+
+    expect(savedIndex).toEqual({
+      sessions: [
+        {
+          sessionId: "session-recover",
+          snapshotFile: "session-recover.json",
+          startedAt: null,
+          lastActivityAt: "2026-06-09T00:10:00.000Z",
+        },
+      ],
+    })
+  })
+
   it("converts a runtime session snapshot before persisting it", () => {
     const root = mkdtempSync(path.join(os.tmpdir(), "usage-sidecar-store-"))
     tempRoots.push(root)
@@ -157,5 +197,22 @@ describe("store-snapshot", () => {
         },
       }),
     ).toThrowError("sessionId must be a non-empty string")
+  })
+
+  it("encodes checkpoint stream keys before writing files", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "usage-sidecar-store-"))
+    tempRoots.push(root)
+    const checkpoint: StreamCheckpoint = {
+      filePath: "C:/Users/admin/.claude/projects/demo/session-2.jsonl",
+      offset: 128,
+    }
+
+    writeCheckpoint(path.join(root, "checkpoints"), "../stream/a", checkpoint)
+
+    const savedCheckpoint = readJson<StreamCheckpoint>(
+      path.join(root, "checkpoints", "..%2Fstream%2Fa.json"),
+    )
+
+    expect(savedCheckpoint).toEqual(checkpoint)
   })
 })

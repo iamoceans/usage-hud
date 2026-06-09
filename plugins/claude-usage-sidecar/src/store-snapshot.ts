@@ -16,6 +16,17 @@ import type {
   StreamCheckpoint,
 } from "./types.js"
 
+const INDEX_LOCK_RETRY_MS = 10
+const INDEX_LOCK_MAX_ATTEMPTS = 50
+
+const sleep = (ms: number): void => {
+  const end = Date.now() + ms
+
+  while (Date.now() < end) {
+    // Busy wait is acceptable here because writes are small and infrequent.
+  }
+}
+
 const atomicWriteJson = (targetFile: string, value: unknown): void => {
   mkdirSync(path.dirname(targetFile), { recursive: true })
 
@@ -38,15 +49,55 @@ const normalizeSessionId = (sessionId: string): string => {
   return sessionId
 }
 
+const normalizeFileKey = (value: string, label: string): string => {
+  if (value.trim().length === 0) {
+    throw new Error(`${label} must be a non-empty string`)
+  }
+
+  return encodeURIComponent(value)
+}
+
 const toSnapshotFileName = (sessionId: string): string =>
-  `${encodeURIComponent(normalizeSessionId(sessionId))}.json`
+  `${normalizeFileKey(normalizeSessionId(sessionId), "sessionId")}.json`
+
+const withFileLock = (lockPath: string, action: () => void): void => {
+  mkdirSync(path.dirname(lockPath), { recursive: true })
+
+  let lockAcquired = false
+
+  for (let attempt = 0; attempt < INDEX_LOCK_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      mkdirSync(lockPath)
+      lockAcquired = true
+      break
+    } catch {
+      sleep(INDEX_LOCK_RETRY_MS)
+    }
+  }
+
+  if (!lockAcquired) {
+    throw new Error(`Could not acquire file lock for ${lockPath}`)
+  }
+
+  try {
+    action()
+  } finally {
+    rmSync(lockPath, { recursive: true, force: true })
+  }
+}
 
 const readSessionIndex = (indexFile: string): SessionIndex => {
   if (!existsSync(indexFile)) {
     return { sessions: [] }
   }
 
-  const parsed = JSON.parse(readFileSync(indexFile, "utf8")) as unknown
+  let parsed: unknown
+
+  try {
+    parsed = JSON.parse(readFileSync(indexFile, "utf8")) as unknown
+  } catch {
+    return { sessions: [] }
+  }
 
   if (
     typeof parsed !== "object" ||
@@ -77,22 +128,24 @@ const upsertSessionIndexEntry = (
   snapshot: SessionSnapshot,
   snapshotFile: string,
 ): void => {
-  const nextEntry: SessionIndexEntry = {
-    sessionId: snapshot.sessionId,
-    snapshotFile,
-    startedAt: snapshot.startedAt,
-    lastActivityAt: snapshot.lastActivityAt,
-  }
-  const current = readSessionIndex(indexFile)
-  const remaining = current.sessions.filter(
-    (entry) => entry.sessionId !== snapshot.sessionId,
-  )
+  withFileLock(`${indexFile}.lock`, () => {
+    const nextEntry: SessionIndexEntry = {
+      sessionId: snapshot.sessionId,
+      snapshotFile,
+      startedAt: snapshot.startedAt,
+      lastActivityAt: snapshot.lastActivityAt,
+    }
+    const current = readSessionIndex(indexFile)
+    const remaining = current.sessions.filter(
+      (entry) => entry.sessionId !== snapshot.sessionId,
+    )
 
-  atomicWriteJson(indexFile, {
-    sessions: [...remaining, nextEntry].sort((left, right) =>
-      left.sessionId.localeCompare(right.sessionId),
-    ),
-  } satisfies SessionIndex)
+    atomicWriteJson(indexFile, {
+      sessions: [...remaining, nextEntry].sort((left, right) =>
+        left.sessionId.localeCompare(right.sessionId),
+      ),
+    } satisfies SessionIndex)
+  })
 }
 
 export const writeSessionSnapshot = (
@@ -120,5 +173,8 @@ export const writeCheckpoint = (
   streamKey: string,
   checkpoint: StreamCheckpoint,
 ): void => {
-  atomicWriteJson(path.join(checkpointsDir, `${streamKey}.json`), checkpoint)
+  atomicWriteJson(
+    path.join(checkpointsDir, `${normalizeFileKey(streamKey, "streamKey")}.json`),
+    checkpoint,
+  )
 }
