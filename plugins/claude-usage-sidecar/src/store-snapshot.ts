@@ -168,6 +168,48 @@ export const writeSessionSnapshot = (
   }
 }
 
+const readCheckpointFile = (checkpointFile: string): StreamCheckpoint | null => {
+  if (!existsSync(checkpointFile)) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(readFileSync(checkpointFile, "utf8")) as unknown
+
+    if (typeof parsed !== "object" || parsed === null) {
+      return null
+    }
+
+    const record = parsed as { filePath?: unknown; offset?: unknown }
+
+    if (
+      typeof record.filePath !== "string" ||
+      record.filePath.length === 0 ||
+      typeof record.offset !== "number" ||
+      !Number.isFinite(record.offset)
+    ) {
+      return null
+    }
+
+    return { filePath: record.filePath, offset: record.offset }
+  } catch {
+    return null
+  }
+}
+
+export const readCheckpoint = (
+  checkpointsDir: string,
+  streamKey: string,
+): StreamCheckpoint | null => {
+  if (streamKey.trim().length === 0) {
+    return null
+  }
+
+  return readCheckpointFile(
+    path.join(checkpointsDir, `${normalizeFileKey(streamKey, "streamKey")}.json`),
+  )
+}
+
 export const writeCheckpoint = (
   checkpointsDir: string,
   streamKey: string,

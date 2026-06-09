@@ -283,7 +283,7 @@ describe("runWatchCycle", () => {
       expect.any(String),
     )
     expect(readTranscriptDelta).toHaveBeenCalledWith("C:/tmp/session.jsonl", 4)
-    expect(writeSessionSnapshot).toHaveBeenCalledTimes(2)
+    expect(writeSessionSnapshot).toHaveBeenCalledTimes(1)
     expect(writeSessionSnapshot).toHaveBeenLastCalledWith(
       "C:/claude/cache/snapshots",
       expect.objectContaining({
@@ -319,5 +319,176 @@ describe("runWatchCycle", () => {
         offset: 128,
       },
     )
+  })
+
+  it("writes one snapshot per session per file and reports counts", () => {
+    const discoverTranscripts = vi.fn(() => ["C:/tmp/a.jsonl", "C:/tmp/b.jsonl"])
+    const loadCheckpoint = vi.fn(() => null)
+    const readTranscriptDelta = vi.fn((filePath: string) => {
+      if (filePath === "C:/tmp/a.jsonl") {
+        return {
+          lines: [
+            JSON.stringify({
+              sessionId: "session-a",
+              timestamp: "2026-06-10T12:00:00.000Z",
+              message: {
+                content: [
+                  {
+                    type: "tool_use",
+                    id: "tool-a1",
+                    name: "Read",
+                    input: {},
+                  },
+                ],
+              },
+            }),
+          ],
+          nextOffset: 64,
+        }
+      }
+
+      return {
+        lines: [
+          JSON.stringify({
+            sessionId: "session-b",
+            timestamp: "2026-06-10T12:00:02.000Z",
+            message: {
+              content: [
+                {
+                  type: "tool_use",
+                  id: "tool-b1",
+                  name: "Skill",
+                  input: { name: "aihot" },
+                },
+              ],
+            },
+          }),
+        ],
+        nextOffset: 80,
+      }
+    })
+    const writeSessionSnapshot = vi.fn()
+    const writeCheckpoint = vi.fn()
+
+    const result = runWatchCycle(
+      {
+        getDefaultConfig: () =>
+          ({
+            projectsDir: "C:/claude/projects",
+            checkpointsDir: "C:/claude/cache/checkpoints",
+            snapshotsDir: "C:/claude/cache/snapshots",
+            indexFile: "C:/claude/cache/index.json",
+          }) as any,
+        discoverTranscripts,
+        loadCheckpoint,
+        readTranscriptDelta,
+        writeSessionSnapshot,
+        writeCheckpoint,
+      },
+    )
+
+    expect(writeSessionSnapshot).toHaveBeenCalledTimes(2)
+    expect(writeCheckpoint).toHaveBeenCalledTimes(2)
+    expect(result).toEqual({
+      filesProcessed: 2,
+      sessionsUpdated: 2,
+      bytesConsumed: 64 + 80,
+      aborted: false,
+    })
+  })
+
+  it("aborts the cycle when the AbortSignal is set and reports aborted=true", () => {
+    const controller = new AbortController()
+    controller.abort()
+    const discoverTranscripts = vi.fn(() => ["C:/tmp/a.jsonl"])
+    const loadCheckpoint = vi.fn(() => null)
+    const readTranscriptDelta = vi.fn()
+    const writeSessionSnapshot = vi.fn()
+    const writeCheckpoint = vi.fn()
+
+    const result = runWatchCycle(
+      {
+        getDefaultConfig: () =>
+          ({
+            projectsDir: "C:/claude/projects",
+            checkpointsDir: "C:/claude/cache/checkpoints",
+            snapshotsDir: "C:/claude/cache/snapshots",
+            indexFile: "C:/claude/cache/index.json",
+          }) as any,
+        discoverTranscripts,
+        loadCheckpoint,
+        readTranscriptDelta,
+        writeSessionSnapshot,
+        writeCheckpoint,
+      },
+      { signal: controller.signal },
+    )
+
+    expect(readTranscriptDelta).not.toHaveBeenCalled()
+    expect(writeSessionSnapshot).not.toHaveBeenCalled()
+    expect(writeCheckpoint).not.toHaveBeenCalled()
+    expect(result.aborted).toBe(true)
+  })
+
+  it("logs and continues when a file fails, instead of throwing", () => {
+    const discoverTranscripts = vi.fn(() => ["C:/tmp/a.jsonl", "C:/tmp/b.jsonl"])
+    const loadCheckpoint = vi.fn(() => null)
+    const readTranscriptDelta = vi.fn((filePath: string) => {
+      if (filePath === "C:/tmp/a.jsonl") {
+        throw new Error("simulated read failure")
+      }
+
+      return {
+        lines: [
+          JSON.stringify({
+            sessionId: "session-b",
+            timestamp: "2026-06-10T12:00:02.000Z",
+            message: {
+              content: [
+                {
+                  type: "tool_use",
+                  id: "tool-b1",
+                  name: "Skill",
+                  input: { name: "aihot" },
+                },
+              ],
+            },
+          }),
+        ],
+        nextOffset: 80,
+      }
+    })
+    const writeSessionSnapshot = vi.fn()
+    const writeCheckpoint = vi.fn()
+    const logs: string[] = []
+
+    const result = runWatchCycle(
+      {
+        getDefaultConfig: () =>
+          ({
+            projectsDir: "C:/claude/projects",
+            checkpointsDir: "C:/claude/cache/checkpoints",
+            snapshotsDir: "C:/claude/cache/snapshots",
+            indexFile: "C:/claude/cache/index.json",
+          }) as any,
+        discoverTranscripts,
+        loadCheckpoint,
+        readTranscriptDelta,
+        writeSessionSnapshot,
+        writeCheckpoint,
+      },
+      { logger: (line) => logs.push(line) },
+    )
+
+    expect(writeCheckpoint).toHaveBeenCalledTimes(1)
+    expect(writeCheckpoint).toHaveBeenLastCalledWith(
+      "C:/claude/cache/checkpoints",
+      expect.any(String),
+      { filePath: "C:/tmp/b.jsonl", offset: 80 },
+    )
+    expect(writeSessionSnapshot).toHaveBeenCalledTimes(1)
+    expect(logs.some((line) => line.includes("C:/tmp/a.jsonl"))).toBe(true)
+    expect(result.aborted).toBe(false)
+    expect(result.filesProcessed).toBe(2)
   })
 })

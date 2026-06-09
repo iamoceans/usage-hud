@@ -9,7 +9,11 @@ import { discoverTranscripts } from "./discover-transcripts.js"
 import { fetchUsageSummary, mergeUsageIntoSnapshot } from "./fetch-usage.js"
 import { parseTranscriptLine } from "./parse-transcript-line.js"
 import { renderSessionReport } from "./report-session.js"
-import { writeCheckpoint, writeSessionSnapshot } from "./store-snapshot.js"
+import {
+  readCheckpoint,
+  writeCheckpoint,
+  writeSessionSnapshot,
+} from "./store-snapshot.js"
 import type { SessionIndex, SessionIndexEntry, SessionRuntimeState, SessionSnapshot, SidecarConfig, StreamCheckpoint } from "./types.js"
 import { readTranscriptDelta } from "./watch-transcript-stream.js"
 
@@ -190,9 +194,9 @@ const isDirectExecution =
   pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url
 
 const defaultLoadCheckpoint = (
-  _checkpointsDir: string,
-  _streamKey: string,
-): StreamCheckpoint | null => null
+  checkpointsDir: string,
+  streamKey: string,
+): StreamCheckpoint | null => readCheckpoint(checkpointsDir, streamKey)
 
 const defaultRunWatchCycleDeps: RunWatchCycleDeps = {
   getDefaultConfig,
@@ -208,44 +212,89 @@ const attachSourceFile = <T extends { sourceFile?: string }>(event: T, sourceFil
   sourceFile,
 })
 
+export type RunWatchCycleResult = {
+  filesProcessed: number
+  sessionsUpdated: number
+  bytesConsumed: number
+  aborted: boolean
+}
+
 export const runWatchCycle = (
   deps: RunWatchCycleDeps = defaultRunWatchCycleDeps,
-): void => {
+  options?: { signal?: AbortSignal; logger?: (line: string) => void },
+): RunWatchCycleResult => {
+  const signal = options?.signal
+  const log = options?.logger ?? (() => undefined)
   const config = deps.getDefaultConfig()
   const files = deps.discoverTranscripts(config.projectsDir)
-  const sessionStates = new Map<string, SessionRuntimeState>()
+  let sessionsUpdated = 0
+  let bytesConsumed = 0
+  let filesProcessed = 0
 
-  for (const filePath of files) {
-    const streamKey = Buffer.from(filePath).toString("base64url")
-    const checkpoint = deps.loadCheckpoint(config.checkpointsDir, streamKey)
-    const delta = deps.readTranscriptDelta(filePath, checkpoint?.offset ?? 0)
-
-    if (delta.lines.length === 0) {
-      continue
+  const checkAborted = (): boolean => {
+    if (signal?.aborted === true) {
+      return true
     }
 
-    for (const line of delta.lines) {
-      const parsedEvents = parseTranscriptLine(line)
+    return false
+  }
 
-      if (parsedEvents.length === 0) {
+  for (const filePath of files) {
+    filesProcessed += 1
+
+    if (checkAborted()) {
+      return { filesProcessed, sessionsUpdated, bytesConsumed, aborted: true }
+    }
+
+    const sessionStates = new Map<string, SessionRuntimeState>()
+
+    try {
+      const streamKey = Buffer.from(filePath).toString("base64url")
+      const checkpoint = deps.loadCheckpoint(config.checkpointsDir, streamKey)
+      const delta = deps.readTranscriptDelta(filePath, checkpoint?.offset ?? 0)
+
+      if (delta.lines.length === 0) {
         continue
       }
 
-      const events = parsedEvents.map((event) => attachSourceFile(event, filePath))
-      const sessionId = events[0].sessionId
-      const current = sessionStates.get(sessionId) ?? createEmptySessionState(sessionId)
-      const reduced = reduceSessionEvents(current, events)
-      sessionStates.set(sessionId, reduced)
-      deps.writeSessionSnapshot(config.snapshotsDir, reduced, {
-        indexFile: config.indexFile,
-      })
-    }
+      for (const line of delta.lines) {
+        if (checkAborted()) {
+          return { filesProcessed, sessionsUpdated, bytesConsumed, aborted: true }
+        }
 
-    deps.writeCheckpoint(config.checkpointsDir, streamKey, {
-      filePath,
-      offset: delta.nextOffset,
-    })
+        const parsedEvents = parseTranscriptLine(line)
+
+        if (parsedEvents.length === 0) {
+          continue
+        }
+
+        const events = parsedEvents.map((event) => attachSourceFile(event, filePath))
+        const sessionId = events[0].sessionId
+        const current = sessionStates.get(sessionId) ?? createEmptySessionState(sessionId)
+        const reduced = reduceSessionEvents(current, events)
+        sessionStates.set(sessionId, reduced)
+      }
+
+      for (const state of sessionStates.values()) {
+        deps.writeSessionSnapshot(config.snapshotsDir, state, {
+          indexFile: config.indexFile,
+        })
+      }
+
+      sessionsUpdated += sessionStates.size
+      bytesConsumed += delta.nextOffset - (checkpoint?.offset ?? 0)
+
+      deps.writeCheckpoint(config.checkpointsDir, streamKey, {
+        filePath,
+        offset: delta.nextOffset,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      log(`watch cycle skipped ${filePath}: ${message}`)
+    }
   }
+
+  return { filesProcessed, sessionsUpdated, bytesConsumed, aborted: false }
 }
 
 if (isDirectExecution) {
