@@ -44,6 +44,9 @@ export type SessionTodoState = {
 
 export type SessionUsageState = {
   available: boolean
+  planName?: string
+  fiveHourUtilization?: number
+  sevenDayUtilization?: number
 }
 
 export type SessionLimitations = {
