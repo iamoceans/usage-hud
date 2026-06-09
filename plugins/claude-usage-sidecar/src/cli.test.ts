@@ -116,6 +116,48 @@ describe("runCli", () => {
     expect(readStderr()).toBe("")
   })
 
+  it("accepts encoded snapshot file names emitted by store-snapshot", async () => {
+    const { io, readStdout, readStderr } = createIo()
+    const index: SessionIndex = {
+      sessions: [
+        {
+          sessionId: "../session/a",
+          snapshotFile: "..%2Fsession%2Fa.json",
+          startedAt: "2026-06-10T00:02:00.000Z",
+          lastActivityAt: "2026-06-10T00:03:00.000Z",
+        },
+      ],
+    }
+    const encodedSnapshot = createSnapshot("../session/a", "2026-06-10T00:03:00.000Z")
+    const readFileSync = (filePath: string): string => {
+      if (path.normalize(filePath) === path.normalize("C:/cache/index.json")) {
+        return JSON.stringify(index)
+      }
+
+      expect(path.normalize(filePath)).toBe(
+        path.normalize("C:/cache/snapshots/..%2Fsession%2Fa.json"),
+      )
+      return JSON.stringify(encodedSnapshot)
+    }
+
+    const exitCode = await runCli(["node", "cli", "report", "--latest"], {
+      io,
+      deps: {
+        readFileSync,
+        fetchUsageSummary: async () => ({ available: false }),
+        getDefaultConfig: () =>
+          ({
+            snapshotsDir: "C:/cache/snapshots",
+            indexFile: "C:/cache/index.json",
+          }) as any,
+      },
+    })
+
+    expect(exitCode).toBe(0)
+    expect(readStdout()).toContain("session: ../session/a")
+    expect(readStderr()).toBe("")
+  })
+
   it("rejects unsafe snapshot file names in index.json for --latest", async () => {
     const { io, readStdout, readStderr } = createIo()
     const index: SessionIndex = {

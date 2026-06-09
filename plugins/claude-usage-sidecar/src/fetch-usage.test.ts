@@ -224,4 +224,65 @@ describe("fetchUsageSummary", () => {
     expect(cached.retryAt).toBe("2026-06-10T00:02:00.000Z")
     expect(cached.usage).toEqual({ available: false })
   })
+
+  it("reuses backoff cache entries without refetching during the retry window", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "usage-sidecar-usage-"))
+    tempRoots.push(root)
+    const usageCacheFile = path.join(root, "usage-cache.json")
+    writeFileSync(
+      path.join(root, ".credentials.json"),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: "oauth-token",
+          expiresAt: Date.parse("2026-06-10T01:00:00.000Z"),
+        },
+      }),
+      "utf8",
+    )
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        headers: {
+          get: (name: string) => (name.toLowerCase() === "retry-after" ? "120" : null),
+        },
+        json: async () => ({}),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          five_hour: {
+            utilization: 55,
+            resets_at: "2026-06-10T05:00:00.000Z",
+          },
+          seven_day: {
+            utilization: 66,
+            resets_at: "2026-06-14T00:00:00.000Z",
+          },
+        }),
+      })
+
+    const first = await fetchUsageSummary({
+      usageCacheFile,
+      claudeDir: root,
+      now: () => Date.parse("2026-06-10T00:00:00.000Z"),
+      deps: {
+        fetch: fetchFn,
+      },
+    })
+    const second = await fetchUsageSummary({
+      usageCacheFile,
+      claudeDir: root,
+      now: () => Date.parse("2026-06-10T00:01:00.000Z"),
+      deps: {
+        fetch: fetchFn,
+      },
+    })
+
+    expect(first).toEqual({ available: false })
+    expect(second).toEqual({ available: false })
+    expect(fetchFn).toHaveBeenCalledTimes(1)
+  })
 })

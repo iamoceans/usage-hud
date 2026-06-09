@@ -40,7 +40,6 @@ const isSafeSnapshotFile = (value: string): boolean =>
   value.endsWith(".json") &&
   !path.isAbsolute(value) &&
   path.basename(value) === value &&
-  !value.includes("..") &&
   !value.includes("/") &&
   !value.includes("\\")
 
