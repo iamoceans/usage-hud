@@ -75,6 +75,11 @@ export type SessionRuntimeState = SessionSnapshot & {
   >
 }
 
+export type StreamCheckpoint = {
+  filePath: string
+  offset: number
+}
+
 export type NormalizedEvent =
   | {
       sessionId: string
