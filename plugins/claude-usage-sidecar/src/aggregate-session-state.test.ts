@@ -229,6 +229,14 @@ describe("aggregate-session-state", () => {
         input: { subagent_type: "review", description: "review reducer" },
       },
     ])
+    state.usage = {
+      available: true,
+      planName: "Max",
+      fiveHourUtilization: 24,
+      fiveHourResetAt: "2026-06-08T15:00:00.000Z",
+      sevenDayUtilization: 80,
+      sevenDayResetAt: "2026-06-13T00:00:00.000Z",
+    }
 
     const snapshot = toPersistedSessionSnapshot(state)
 
@@ -248,6 +256,7 @@ describe("aggregate-session-state", () => {
           description: "review reducer",
           status: "running",
           startTime: "2026-06-08T12:20:00.000Z",
+          endTime: undefined,
         },
       ],
       todos: {
@@ -256,7 +265,14 @@ describe("aggregate-session-state", () => {
         inProgress: 0,
         items: [],
       },
-      usage: { available: false },
+      usage: {
+        available: true,
+        planName: "Max",
+        fiveHourUtilization: 24,
+        fiveHourResetAt: "2026-06-08T15:00:00.000Z",
+        sevenDayUtilization: 80,
+        sevenDayResetAt: "2026-06-13T00:00:00.000Z",
+      },
       limitations: {
         perToolTokens: "unavailable",
         perSkillTokens: "unavailable",

@@ -4,6 +4,7 @@ import type {
   SessionRuntimeState,
   SessionSnapshot,
   SessionTodoState,
+  SessionUsageState,
   TodoItem,
   ToolCounter,
 } from "./types.js"
@@ -51,6 +52,15 @@ const cloneAgent = (agent: SessionAgentState): SessionAgentState => ({
   endTime: agent.endTime,
 })
 
+const cloneUsageState = (usage: SessionUsageState): SessionUsageState => ({
+  available: usage.available,
+  planName: usage.planName,
+  fiveHourUtilization: usage.fiveHourUtilization,
+  fiveHourResetAt: usage.fiveHourResetAt,
+  sevenDayUtilization: usage.sevenDayUtilization,
+  sevenDayResetAt: usage.sevenDayResetAt,
+})
+
 const cloneState = (state: SessionRuntimeState): SessionRuntimeState => ({
   sessionId: state.sessionId,
   startedAt: state.startedAt,
@@ -60,7 +70,7 @@ const cloneState = (state: SessionRuntimeState): SessionRuntimeState => ({
   skills: cloneCounterMap(state.skills),
   agents: state.agents.map(cloneAgent),
   todos: cloneTodoState(state.todos),
-  usage: { available: state.usage.available },
+  usage: cloneUsageState(state.usage),
   limitations: {
     perToolTokens: state.limitations.perToolTokens,
     perSkillTokens: state.limitations.perSkillTokens,
@@ -288,7 +298,7 @@ export const toPersistedSessionSnapshot = (
   skills: cloneCounterMap(state.skills),
   agents: state.agents.map(cloneAgent),
   todos: cloneTodoState(state.todos),
-  usage: { available: state.usage.available },
+  usage: cloneUsageState(state.usage),
   limitations: {
     perToolTokens: state.limitations.perToolTokens,
     perSkillTokens: state.limitations.perSkillTokens,
