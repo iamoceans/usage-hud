@@ -64,6 +64,17 @@ export type SessionSnapshot = {
   limitations: SessionLimitations
 }
 
+export type SessionIndexEntry = {
+  sessionId: string
+  snapshotFile: string
+  startedAt: string | null
+  lastActivityAt: string | null
+}
+
+export type SessionIndex = {
+  sessions: SessionIndexEntry[]
+}
+
 export type SessionRuntimeState = SessionSnapshot & {
   openToolCalls: Record<
     string,
