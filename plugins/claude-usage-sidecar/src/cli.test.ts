@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import * as path from "node:path"
-import { runCli } from "./cli.js"
+import { runCli, runWatchCycle } from "./cli.js"
 import type { SessionIndex, SessionSnapshot } from "./types.js"
 
 const createIo = () => {
@@ -216,5 +216,108 @@ describe("runCli", () => {
     expect(exitCode).toBe(1)
     expect(readStdout()).toContain("report --session <session-id>")
     expect(readStderr()).toBe("")
+  })
+})
+
+describe("runWatchCycle", () => {
+  it("discovers transcripts, resumes from checkpoints, reduces events, and persists outputs", () => {
+    const discoverTranscripts = vi.fn(() => ["C:/tmp/session.jsonl"])
+    const loadCheckpoint = vi.fn(() => ({
+      filePath: "C:/tmp/session.jsonl",
+      offset: 4,
+    }))
+    const readTranscriptDelta = vi.fn(() => ({
+      lines: [
+        JSON.stringify({
+          sessionId: "session-1",
+          timestamp: "2026-06-10T12:00:00.000Z",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                id: "tool-1",
+                name: "Skill",
+                input: { name: "aihot" },
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          sessionId: "session-1",
+          timestamp: "2026-06-10T12:00:01.000Z",
+          message: {
+            content: [
+              {
+                type: "tool_result",
+                tool_use_id: "tool-1",
+                is_error: false,
+              },
+            ],
+          },
+        }),
+      ],
+      nextOffset: 128,
+    }))
+    const writeSessionSnapshot = vi.fn()
+    const writeCheckpoint = vi.fn()
+
+    runWatchCycle({
+      getDefaultConfig: () =>
+        ({
+          projectsDir: "C:/claude/projects",
+          checkpointsDir: "C:/claude/cache/checkpoints",
+          snapshotsDir: "C:/claude/cache/snapshots",
+          indexFile: "C:/claude/cache/index.json",
+        }) as any,
+      discoverTranscripts,
+      loadCheckpoint,
+      readTranscriptDelta,
+      writeSessionSnapshot,
+      writeCheckpoint,
+    })
+
+    expect(discoverTranscripts).toHaveBeenCalledWith("C:/claude/projects")
+    expect(loadCheckpoint).toHaveBeenCalledTimes(1)
+    expect(loadCheckpoint).toHaveBeenCalledWith(
+      "C:/claude/cache/checkpoints",
+      expect.any(String),
+    )
+    expect(readTranscriptDelta).toHaveBeenCalledWith("C:/tmp/session.jsonl", 4)
+    expect(writeSessionSnapshot).toHaveBeenCalledTimes(2)
+    expect(writeSessionSnapshot).toHaveBeenLastCalledWith(
+      "C:/claude/cache/snapshots",
+      expect.objectContaining({
+        sessionId: "session-1",
+        lastActivityAt: "2026-06-10T12:00:01.000Z",
+        sourceFiles: ["C:/tmp/session.jsonl"],
+        tools: {
+          Skill: {
+            calls: 1,
+            completed: 1,
+            errors: 0,
+            running: 0,
+          },
+        },
+        skills: {
+          aihot: {
+            calls: 1,
+            completed: 1,
+            errors: 0,
+            running: 0,
+          },
+        },
+      }),
+      {
+        indexFile: "C:/claude/cache/index.json",
+      },
+    )
+    expect(writeCheckpoint).toHaveBeenCalledWith(
+      "C:/claude/cache/checkpoints",
+      expect.any(String),
+      {
+        filePath: "C:/tmp/session.jsonl",
+        offset: 128,
+      },
+    )
   })
 })

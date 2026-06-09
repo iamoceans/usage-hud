@@ -4,9 +4,23 @@ import { readFileSync } from "node:fs"
 import * as path from "node:path"
 import { pathToFileURL } from "node:url"
 import { getDefaultConfig } from "./config.js"
+import { createEmptySessionState, reduceSessionEvents } from "./aggregate-session-state.js"
+import { discoverTranscripts } from "./discover-transcripts.js"
 import { fetchUsageSummary, mergeUsageIntoSnapshot } from "./fetch-usage.js"
+import { parseTranscriptLine } from "./parse-transcript-line.js"
 import { renderSessionReport } from "./report-session.js"
-import type { SessionIndex, SessionIndexEntry, SessionSnapshot, SidecarConfig } from "./types.js"
+import { writeCheckpoint, writeSessionSnapshot } from "./store-snapshot.js"
+import type { SessionIndex, SessionIndexEntry, SessionRuntimeState, SessionSnapshot, SidecarConfig, StreamCheckpoint } from "./types.js"
+import { readTranscriptDelta } from "./watch-transcript-stream.js"
+
+export type RunWatchCycleDeps = {
+  getDefaultConfig: typeof getDefaultConfig
+  discoverTranscripts: typeof discoverTranscripts
+  loadCheckpoint: (checkpointsDir: string, streamKey: string) => StreamCheckpoint | null
+  readTranscriptDelta: typeof readTranscriptDelta
+  writeSessionSnapshot: typeof writeSessionSnapshot
+  writeCheckpoint: typeof writeCheckpoint
+}
 
 type CliIO = {
   stdout: {
@@ -174,6 +188,65 @@ export const runCli = (
 const isDirectExecution =
   typeof process.argv[1] === "string" &&
   pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url
+
+const defaultLoadCheckpoint = (
+  _checkpointsDir: string,
+  _streamKey: string,
+): StreamCheckpoint | null => null
+
+const defaultRunWatchCycleDeps: RunWatchCycleDeps = {
+  getDefaultConfig,
+  discoverTranscripts,
+  loadCheckpoint: defaultLoadCheckpoint,
+  readTranscriptDelta,
+  writeSessionSnapshot,
+  writeCheckpoint,
+}
+
+const attachSourceFile = <T extends { sourceFile?: string }>(event: T, sourceFile: string): T => ({
+  ...event,
+  sourceFile,
+})
+
+export const runWatchCycle = (
+  deps: RunWatchCycleDeps = defaultRunWatchCycleDeps,
+): void => {
+  const config = deps.getDefaultConfig()
+  const files = deps.discoverTranscripts(config.projectsDir)
+  const sessionStates = new Map<string, SessionRuntimeState>()
+
+  for (const filePath of files) {
+    const streamKey = Buffer.from(filePath).toString("base64url")
+    const checkpoint = deps.loadCheckpoint(config.checkpointsDir, streamKey)
+    const delta = deps.readTranscriptDelta(filePath, checkpoint?.offset ?? 0)
+
+    if (delta.lines.length === 0) {
+      continue
+    }
+
+    for (const line of delta.lines) {
+      const parsedEvents = parseTranscriptLine(line)
+
+      if (parsedEvents.length === 0) {
+        continue
+      }
+
+      const events = parsedEvents.map((event) => attachSourceFile(event, filePath))
+      const sessionId = events[0].sessionId
+      const current = sessionStates.get(sessionId) ?? createEmptySessionState(sessionId)
+      const reduced = reduceSessionEvents(current, events)
+      sessionStates.set(sessionId, reduced)
+      deps.writeSessionSnapshot(config.snapshotsDir, reduced, {
+        indexFile: config.indexFile,
+      })
+    }
+
+    deps.writeCheckpoint(config.checkpointsDir, streamKey, {
+      filePath,
+      offset: delta.nextOffset,
+    })
+  }
+}
 
 if (isDirectExecution) {
   void runCli(process.argv).then((exitCode) => {
