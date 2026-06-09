@@ -15,12 +15,16 @@ type ClaudeOauthBlob = {
 type UsageCacheRecord = {
   fetchedAt: string
   usage: SessionUsageState
+  retryAt?: string
 }
 
 type UsageResponseLike = {
   ok: boolean
   status: number
   json: () => Promise<unknown>
+  headers?: {
+    get: (name: string) => string | null
+  }
 }
 
 type UsageDeps = {
@@ -34,6 +38,8 @@ type UsageDeps = {
 const USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 const BETA_HEADER = "oauth-2025-04-20"
 const DEFAULT_CACHE_TTL_MS = 60_000
+const DEFAULT_FAILURE_BACKOFF_MS = 30_000
+const DEFAULT_RATE_LIMIT_BACKOFF_MS = 60_000
 
 const defaultDeps: UsageDeps = {
   existsSync,
@@ -73,6 +79,12 @@ const readCachedUsage = (
   }
 
   const fetchedAtMs = Date.parse(cached.fetchedAt)
+  const retryAtMs =
+    typeof cached.retryAt === "string" ? Date.parse(cached.retryAt) : Number.NaN
+
+  if (Number.isFinite(retryAtMs) && retryAtMs > nowMs) {
+    return cached.usage
+  }
 
   if (!Number.isFinite(fetchedAtMs) || nowMs - fetchedAtMs > ttlMs) {
     return null
@@ -173,6 +185,7 @@ const writeUsageCache = (
   usage: SessionUsageState,
   fetchedAt: string,
   deps: UsageDeps,
+  retryAt?: string,
 ): void => {
   deps.mkdirSync(path.dirname(cacheFile), { recursive: true })
   deps.writeFileSync(
@@ -181,12 +194,38 @@ const writeUsageCache = (
       {
         fetchedAt,
         usage,
+        retryAt,
       } satisfies UsageCacheRecord,
       null,
       2,
     ),
     "utf8",
   )
+}
+
+const parseRetryAfterMs = (
+  response: UsageResponseLike,
+  nowMs: number,
+): number | null => {
+  const headerValue = response.headers?.get("retry-after")
+
+  if (headerValue === null || headerValue === undefined) {
+    return null
+  }
+
+  const numericSeconds = Number(headerValue)
+
+  if (Number.isFinite(numericSeconds) && numericSeconds >= 0) {
+    return numericSeconds * 1000
+  }
+
+  const dateMs = Date.parse(headerValue)
+
+  if (!Number.isFinite(dateMs)) {
+    return null
+  }
+
+  return Math.max(dateMs - nowMs, 0)
 }
 
 export const fetchUsageSummary = async (options?: {
@@ -230,7 +269,20 @@ export const fetchUsageSummary = async (options?: {
     })
 
     if (!response.ok) {
-      return unavailableUsage()
+      const unavailable = unavailableUsage()
+      const retryMs =
+        response.status === 429
+          ? parseRetryAfterMs(response, nowMs) ?? DEFAULT_RATE_LIMIT_BACKOFF_MS
+          : DEFAULT_FAILURE_BACKOFF_MS
+
+      writeUsageCache(
+        usageCacheFile,
+        unavailable,
+        new Date(nowMs).toISOString(),
+        deps,
+        new Date(nowMs + retryMs).toISOString(),
+      )
+      return unavailable
     }
 
     const usage = normalizeUsageSummary(
@@ -245,17 +297,40 @@ export const fetchUsageSummary = async (options?: {
     writeUsageCache(usageCacheFile, usage, new Date(nowMs).toISOString(), deps)
     return usage
   } catch {
-    return unavailableUsage()
+    const unavailable = unavailableUsage()
+    writeUsageCache(
+      usageCacheFile,
+      unavailable,
+      new Date(nowMs).toISOString(),
+      deps,
+      new Date(nowMs + DEFAULT_FAILURE_BACKOFF_MS).toISOString(),
+    )
+    return unavailable
   }
 }
 
 export const mergeUsageIntoSnapshot = (
   snapshot: SessionSnapshot,
   usage: UsageSummary,
-): SessionSnapshot => ({
-  ...snapshot,
-  usage: {
-    ...snapshot.usage,
-    ...usage,
-  },
-})
+): SessionSnapshot => {
+  if (!usage.available) {
+    return {
+      ...snapshot,
+      usage: {
+        available: false,
+      },
+    }
+  }
+
+  return {
+    ...snapshot,
+    usage: {
+      available: true,
+      planName: usage.planName,
+      fiveHourUtilization: usage.fiveHourUtilization,
+      fiveHourResetAt: usage.fiveHourResetAt,
+      sevenDayUtilization: usage.sevenDayUtilization,
+      sevenDayResetAt: usage.sevenDayResetAt,
+    },
+  }
+}

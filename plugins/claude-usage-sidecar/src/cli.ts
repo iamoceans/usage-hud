@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs"
 import * as path from "node:path"
 import { pathToFileURL } from "node:url"
 import { getDefaultConfig } from "./config.js"
+import { fetchUsageSummary, mergeUsageIntoSnapshot } from "./fetch-usage.js"
 import { renderSessionReport } from "./report-session.js"
 import type { SessionIndex, SessionIndexEntry, SessionSnapshot, SidecarConfig } from "./types.js"
 
@@ -19,6 +20,7 @@ type CliIO = {
 type CliDeps = {
   readFileSync: typeof readFileSync
   getDefaultConfig: typeof getDefaultConfig
+  fetchUsageSummary: typeof fetchUsageSummary
 }
 
 const usageText =
@@ -33,8 +35,43 @@ const readSnapshot = (
   deps: CliDeps,
 ): SessionSnapshot => JSON.parse(deps.readFileSync(snapshotFile, "utf8")) as SessionSnapshot
 
-const readIndex = (indexFile: string, deps: CliDeps): SessionIndex =>
-  JSON.parse(deps.readFileSync(indexFile, "utf8")) as SessionIndex
+const isSafeSnapshotFile = (value: string): boolean =>
+  value.trim().length > 0 &&
+  value.endsWith(".json") &&
+  !path.isAbsolute(value) &&
+  path.basename(value) === value &&
+  !value.includes("..") &&
+  !value.includes("/") &&
+  !value.includes("\\")
+
+const readIndex = (indexFile: string, deps: CliDeps): SessionIndex => {
+  const parsed = JSON.parse(deps.readFileSync(indexFile, "utf8")) as unknown
+
+  if (typeof parsed !== "object" || parsed === null || !("sessions" in parsed)) {
+    throw new Error("index.json is malformed")
+  }
+
+  const sessions = (parsed as { sessions: unknown }).sessions
+
+  if (!Array.isArray(sessions)) {
+    throw new Error("index.json is malformed")
+  }
+
+  const normalizedSessions = sessions.filter(
+    (entry): entry is SessionIndexEntry =>
+      typeof entry === "object" &&
+      entry !== null &&
+      typeof entry.sessionId === "string" &&
+      typeof entry.snapshotFile === "string" &&
+      isSafeSnapshotFile(entry.snapshotFile) &&
+      ("startedAt" in entry ? entry.startedAt === null || typeof entry.startedAt === "string" : false) &&
+      ("lastActivityAt" in entry
+        ? entry.lastActivityAt === null || typeof entry.lastActivityAt === "string"
+        : false),
+  )
+
+  return { sessions: normalizedSessions }
+}
 
 const scoreIndexEntry = (entry: SessionIndexEntry): number => {
   const lastActivityScore =
@@ -85,12 +122,6 @@ const resolveSnapshotFile = (
     return path.join(config.snapshotsDir, toSnapshotFileName(sessionId))
   }
 
-  const legacySessionId = argv[3]
-
-  if (typeof legacySessionId === "string" && legacySessionId.trim().length > 0) {
-    return path.join(config.snapshotsDir, toSnapshotFileName(legacySessionId))
-  }
-
   return null
 }
 
@@ -100,20 +131,22 @@ export const runCli = (
     io?: CliIO
     deps?: Partial<CliDeps>
   },
-): number => {
+): Promise<number> => {
   const io = options?.io ?? process
   const deps: CliDeps = {
     readFileSync: options?.deps?.readFileSync ?? readFileSync,
     getDefaultConfig: options?.deps?.getDefaultConfig ?? getDefaultConfig,
+    fetchUsageSummary: options?.deps?.fetchUsageSummary ?? fetchUsageSummary,
   }
   const [, , command] = argv
 
   if (command !== "report") {
     io.stdout.write(usageText)
-    return 1
+    return Promise.resolve(1)
   }
 
-  try {
+  return (async () => {
+    try {
     const config = deps.getDefaultConfig()
     const snapshotFile = resolveSnapshotFile(argv, config, deps)
 
@@ -122,15 +155,21 @@ export const runCli = (
       return 1
     }
 
-    const snapshot = readSnapshot(snapshotFile, deps)
+      const snapshot = readSnapshot(snapshotFile, deps)
+      const usage = await deps.fetchUsageSummary({
+        usageCacheFile: config.usageCacheFile,
+        claudeDir: config.claudeDir,
+      })
+      const mergedSnapshot = mergeUsageIntoSnapshot(snapshot, usage)
 
-    io.stdout.write(`${renderSessionReport(snapshot)}\n`)
+      io.stdout.write(`${renderSessionReport(mergedSnapshot)}\n`)
     return 0
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    io.stderr.write(`failed to render report: ${message}\n`)
-    return 1
-  }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      io.stderr.write(`failed to render report: ${message}\n`)
+      return 1
+    }
+  })()
 }
 
 const isDirectExecution =
@@ -138,5 +177,7 @@ const isDirectExecution =
   pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url
 
 if (isDirectExecution) {
-  process.exitCode = runCli(process.argv)
+  void runCli(process.argv).then((exitCode) => {
+    process.exitCode = exitCode
+  })
 }

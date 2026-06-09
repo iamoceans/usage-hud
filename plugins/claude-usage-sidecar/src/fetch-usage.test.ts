@@ -42,6 +42,24 @@ describe("mergeUsageIntoSnapshot", () => {
     expect(next.usage).not.toHaveProperty("sessionInputTokens")
     expect(next.usage).not.toHaveProperty("sessionOutputTokens")
   })
+
+  it("clears stale usage fields when availability falls back to false", () => {
+    const snapshot = mergeUsageIntoSnapshot(
+      toPersistedSessionSnapshot(createEmptySessionState("session-1")),
+      {
+        available: true,
+        planName: "Max",
+        fiveHourUtilization: 12,
+        fiveHourResetAt: "2026-06-10T05:00:00.000Z",
+        sevenDayUtilization: 34,
+        sevenDayResetAt: "2026-06-14T00:00:00.000Z",
+      },
+    )
+
+    const next = mergeUsageIntoSnapshot(snapshot, { available: false })
+
+    expect(next.usage).toEqual({ available: false })
+  })
 })
 
 describe("fetchUsageSummary", () => {
@@ -160,5 +178,50 @@ describe("fetchUsageSummary", () => {
 
     expect(usage).toEqual({ available: false })
     expect(fetchFn).not.toHaveBeenCalled()
+  })
+
+  it("writes a retry-backoff cache entry when the usage endpoint is rate limited", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "usage-sidecar-usage-"))
+    tempRoots.push(root)
+    const usageCacheFile = path.join(root, "usage-cache.json")
+    writeFileSync(
+      path.join(root, ".credentials.json"),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: "oauth-token",
+          expiresAt: Date.parse("2026-06-10T01:00:00.000Z"),
+        },
+      }),
+      "utf8",
+    )
+    const fetchFn = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: {
+        get: (name: string) => (name.toLowerCase() === "retry-after" ? "120" : null),
+      },
+      json: async () => ({}),
+    })
+
+    const usage = await fetchUsageSummary({
+      usageCacheFile,
+      claudeDir: root,
+      now: () => Date.parse("2026-06-10T00:00:00.000Z"),
+      deps: {
+        fetch: fetchFn,
+      },
+    })
+
+    expect(usage).toEqual({ available: false })
+
+    const cached = JSON.parse(readFileSync(usageCacheFile, "utf8")) as {
+      fetchedAt: string
+      retryAt?: string
+      usage: Record<string, unknown>
+    }
+
+    expect(cached.fetchedAt).toBe("2026-06-10T00:00:00.000Z")
+    expect(cached.retryAt).toBe("2026-06-10T00:02:00.000Z")
+    expect(cached.usage).toEqual({ available: false })
   })
 })
