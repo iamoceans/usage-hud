@@ -3,7 +3,11 @@ import { appendFileSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSy
 import * as os from "node:os"
 import * as path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import { readTranscriptDelta } from "./watch-transcript-stream.js"
+import {
+  clearTranscriptCursorCache,
+  dropTranscriptCursorCacheEntry,
+  readTranscriptDelta,
+} from "./watch-transcript-stream.js"
 
 const tempRoots: string[] = []
 
@@ -141,5 +145,36 @@ describe("readTranscriptDelta", () => {
 
     expect(second.lines).toEqual([])
     expect(second.nextOffset).toBe(first.nextOffset)
+  })
+})
+
+describe("dropTranscriptCursorCacheEntry / clearTranscriptCursorCache", () => {
+  it("drops a single entry by file path and forces a re-stat on the next call", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "usage-sidecar-watch-"))
+    tempRoots.push(root)
+    const file = path.join(root, "session.jsonl")
+
+    mkdirSync(path.dirname(file), { recursive: true })
+    writeFileSync(file, '{"a":1}\n')
+
+    const first = readTranscriptDelta(file, 0)
+    expect(first.nextOffset).toBe(Buffer.byteLength('{"a":1}\n'))
+
+    // Append while the cursor is cached. Without a cache drop, the second
+    // call still uses the in-memory cursor (no re-stat) — but the new line
+    // is appended, so the call sees it via the cached size. Verify both the
+    // explicit drop semantics and the no-throw path.
+    appendFileSync(file, '{"b":2}\n')
+    expect(dropTranscriptCursorCacheEntry(file)).toBe(true)
+    // Idempotent: second drop returns false.
+    expect(dropTranscriptCursorCacheEntry(file)).toBe(false)
+
+    const second = readTranscriptDelta(file, first.nextOffset)
+    expect(second.lines).toEqual(['{"b":2}'])
+  })
+
+  it("clearTranscriptCursorCache drops every entry without throwing on an empty cache", () => {
+    clearTranscriptCursorCache()
+    expect(() => clearTranscriptCursorCache()).not.toThrow()
   })
 })

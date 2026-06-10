@@ -40,6 +40,26 @@ and the daemon loop can drive the watch cycle without touching the filesystem.
 
 ## CLI
 
+The CLI ships as a binary named `claude-usage-sidecar`. It is **not** built
+on `npm install` — compile the package first, then invoke the built
+entrypoint directly (the binary is wired up via the `bin` field in
+`package.json`).
+
+```bash
+# 1. Build TypeScript to dist/
+cd plugins/claude-usage-sidecar
+npm run build
+
+# 2. Render a report for a specific session id
+node ./dist/cli.js report --session <session-id>
+
+# 3. Or render the most recent session from the index
+node ./dist/cli.js report --latest
+```
+
+When the package is published or linked with `npm link`, the `bin`
+shortcut becomes available on `$PATH`:
+
 ```bash
 claude-usage-sidecar report --session <session-id>
 claude-usage-sidecar report --latest

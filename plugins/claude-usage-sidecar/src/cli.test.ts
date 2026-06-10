@@ -491,4 +491,112 @@ describe("runWatchCycle", () => {
     expect(result.aborted).toBe(false)
     expect(result.filesProcessed).toBe(2)
   })
+
+  it("drops the cursor cache after a successful checkpoint so rotated files re-stat next cycle", () => {
+    const discoverTranscripts = vi.fn(() => ["C:/tmp/session.jsonl"])
+    const loadCheckpoint = vi.fn(() => null)
+    const readTranscriptDelta = vi.fn(() => ({
+      lines: [
+        JSON.stringify({
+          sessionId: "session-1",
+          timestamp: "2026-06-10T12:00:00.000Z",
+          message: {
+            content: [
+              {
+                type: "tool_use",
+                id: "tool-1",
+                name: "Read",
+                input: {},
+              },
+            ],
+          },
+        }),
+      ],
+      nextOffset: 64,
+    }))
+    const writeSessionSnapshot = vi.fn()
+    const writeCheckpoint = vi.fn()
+    const dropTranscriptCursorCacheEntry = vi.fn(() => true)
+
+    runWatchCycle({
+      getDefaultConfig: () =>
+        ({
+          projectsDir: "C:/claude/projects",
+          checkpointsDir: "C:/claude/cache/checkpoints",
+          snapshotsDir: "C:/claude/cache/snapshots",
+          indexFile: "C:/claude/cache/index.json",
+        }) as any,
+      discoverTranscripts,
+      loadCheckpoint,
+      readTranscriptDelta,
+      writeSessionSnapshot,
+      writeCheckpoint,
+      dropTranscriptCursorCacheEntry,
+    })
+
+    expect(dropTranscriptCursorCacheEntry).toHaveBeenCalledWith("C:/tmp/session.jsonl")
+  })
+
+  it("writes a no-op checkpoint + drops the cache when the file delta is empty and no checkpoint exists", () => {
+    const discoverTranscripts = vi.fn(() => ["C:/tmp/empty.jsonl"])
+    const loadCheckpoint = vi.fn(() => null)
+    const readTranscriptDelta = vi.fn(() => ({ lines: [], nextOffset: 0 }))
+    const writeSessionSnapshot = vi.fn()
+    const writeCheckpoint = vi.fn()
+    const dropTranscriptCursorCacheEntry = vi.fn(() => true)
+
+    runWatchCycle({
+      getDefaultConfig: () =>
+        ({
+          projectsDir: "C:/claude/projects",
+          checkpointsDir: "C:/claude/cache/checkpoints",
+          snapshotsDir: "C:/claude/cache/snapshots",
+          indexFile: "C:/claude/cache/index.json",
+        }) as any,
+      discoverTranscripts,
+      loadCheckpoint,
+      readTranscriptDelta,
+      writeSessionSnapshot,
+      writeCheckpoint,
+      dropTranscriptCursorCacheEntry,
+    })
+
+    expect(writeSessionSnapshot).not.toHaveBeenCalled()
+    expect(writeCheckpoint).toHaveBeenCalledTimes(1)
+    expect(writeCheckpoint).toHaveBeenCalledWith(
+      "C:/claude/cache/checkpoints",
+      expect.any(String),
+      { filePath: "C:/tmp/empty.jsonl", offset: 0 },
+    )
+    expect(dropTranscriptCursorCacheEntry).toHaveBeenCalledWith("C:/tmp/empty.jsonl")
+  })
+
+  it("does NOT re-write the checkpoint on empty deltas when one already exists, but still drops the cache", () => {
+    const discoverTranscripts = vi.fn(() => ["C:/tmp/empty.jsonl"])
+    const loadCheckpoint = vi.fn(() => ({ filePath: "C:/tmp/empty.jsonl", offset: 128 }))
+    const readTranscriptDelta = vi.fn(() => ({ lines: [], nextOffset: 128 }))
+    const writeSessionSnapshot = vi.fn()
+    const writeCheckpoint = vi.fn()
+    const dropTranscriptCursorCacheEntry = vi.fn(() => true)
+
+    runWatchCycle({
+      getDefaultConfig: () =>
+        ({
+          projectsDir: "C:/claude/projects",
+          checkpointsDir: "C:/claude/cache/checkpoints",
+          snapshotsDir: "C:/claude/cache/snapshots",
+          indexFile: "C:/claude/cache/index.json",
+        }) as any,
+      discoverTranscripts,
+      loadCheckpoint,
+      readTranscriptDelta,
+      writeSessionSnapshot,
+      writeCheckpoint,
+      dropTranscriptCursorCacheEntry,
+    })
+
+    expect(writeCheckpoint).not.toHaveBeenCalled()
+    expect(writeSessionSnapshot).not.toHaveBeenCalled()
+    expect(dropTranscriptCursorCacheEntry).toHaveBeenCalledWith("C:/tmp/empty.jsonl")
+  })
 })

@@ -15,7 +15,7 @@ import {
   writeSessionSnapshot,
 } from "./store-snapshot.js"
 import type { SessionIndex, SessionIndexEntry, SessionRuntimeState, SessionSnapshot, SidecarConfig, StreamCheckpoint } from "./types.js"
-import { readTranscriptDelta } from "./watch-transcript-stream.js"
+import { dropTranscriptCursorCacheEntry, readTranscriptDelta } from "./watch-transcript-stream.js"
 
 export type RunWatchCycleDeps = {
   getDefaultConfig: typeof getDefaultConfig
@@ -24,6 +24,7 @@ export type RunWatchCycleDeps = {
   readTranscriptDelta: typeof readTranscriptDelta
   writeSessionSnapshot: typeof writeSessionSnapshot
   writeCheckpoint: typeof writeCheckpoint
+  dropTranscriptCursorCacheEntry?: (filePath: string) => boolean
 }
 
 type CliIO = {
@@ -254,6 +255,16 @@ export const runWatchCycle = (
       const delta = deps.readTranscriptDelta(filePath, checkpoint?.offset ?? 0)
 
       if (delta.lines.length === 0) {
+        // Persist a no-op checkpoint (when we don't already have one) so the
+        // cached cursor is anchored to a durable offset, and free the cache
+        // entry so the next cycle re-stat's the file from scratch.
+        if (checkpoint === null) {
+          deps.writeCheckpoint(config.checkpointsDir, streamKey, {
+            filePath,
+            offset: delta.nextOffset,
+          })
+        }
+        deps.dropTranscriptCursorCacheEntry?.(filePath)
         continue
       }
 
@@ -288,6 +299,10 @@ export const runWatchCycle = (
         filePath,
         offset: delta.nextOffset,
       })
+      // The cursor for this file is now anchored in the checkpoint; release
+      // the in-memory cache so the next cycle re-stat's from disk (matters
+      // for rotated log files where the inode/size can change between runs).
+      deps.dropTranscriptCursorCacheEntry?.(filePath)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       log(`watch cycle skipped ${filePath}: ${message}`)

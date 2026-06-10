@@ -4,6 +4,13 @@
   "private": true,
   "type": "module",
   "description": "Standalone Claude Code usage sidecar",
+  "bin": {
+    "claude-usage-sidecar": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
     "test": "vitest run"

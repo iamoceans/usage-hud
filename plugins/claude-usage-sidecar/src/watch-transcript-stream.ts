@@ -50,6 +50,23 @@ const createCursor = (
 const getFileIdentity = (fileStat: Stats): string => `${fileStat.dev}:${fileStat.ino}:${fileStat.birthtimeMs}`
 const transcriptCursorCache = new Map<string, TranscriptCursor>()
 
+/**
+ * Drop a single cache entry. Returns true if an entry was removed.
+ * Used by the watch loop after a file's checkpoint has been persisted
+ * so the cache does not pin stale cursor state for files that are
+ * rotated/closed between cycles.
+ */
+export const dropTranscriptCursorCacheEntry = (filePath: string): boolean =>
+  transcriptCursorCache.delete(filePath)
+
+/**
+ * Clear the entire cursor cache. Intended for tests and for full
+ * watch-loop resets (e.g. when the list of watched files changes).
+ */
+export const clearTranscriptCursorCache = (): void => {
+  transcriptCursorCache.clear()
+}
+
 const readRange = (
   filePath: string,
   startOffset: number,
