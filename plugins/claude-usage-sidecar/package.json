@@ -12,7 +12,9 @@
     ".": "./dist/index.js"
   },
   "scripts": {
-    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
+    "build": "tsc -b tsconfig.json",
+    "build:force": "tsc -b tsconfig.json --force",
+    "clean": "node -e \"const fs=require('node:fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('.tsbuildinfo',{force:true})\"",
     "test": "vitest run"
   },
   "devDependencies": {
