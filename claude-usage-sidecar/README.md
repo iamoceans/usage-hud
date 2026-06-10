@@ -7,7 +7,9 @@ under `~/.claude/cache/usage-hud/`.
 ## Status
 
 The repository also contains a standalone Claude Code sidecar package at
-`plugins/claude-usage-sidecar/`.
+`claude-usage-sidecar/` (sibling of the opencode TUI plugin at
+`plugins/token-usage-tui/`; the two are fully isolated — no shared
+source, no shared dependencies, no cross-plugin imports).
 
 Version 1 intentionally exposes only truthful values:
 
@@ -47,7 +49,7 @@ entrypoint directly (the binary is wired up via the `bin` field in
 
 ```bash
 # 1. Build TypeScript to dist/
-cd plugins/claude-usage-sidecar
+cd claude-usage-sidecar
 npm run build
 
 # 2. Render a report for a specific session id
