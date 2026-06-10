@@ -6,10 +6,16 @@ under `~/.claude/cache/usage-hud/`.
 
 ## Status
 
-The repository also contains a standalone Claude Code sidecar package at
-`claude-usage-sidecar/` (sibling of the opencode TUI plugin at
-`plugins/token-usage-tui/`; the two are fully isolated — no shared
-source, no shared dependencies, no cross-plugin imports).
+The repository contains two independent products, both at the top
+level of the work tree:
+
+  - `claude-usage-sidecar/` — this package (a standalone Claude Code
+    sidecar CLI; not loaded by opencode)
+  - `token-usage-tui/` — the original opencode TUI plugin (loaded by
+    `tui.json` at the repo root)
+
+The two are fully isolated — no shared source, no shared dependencies,
+no cross-plugin imports.
 
 Version 1 intentionally exposes only truthful values:
 
