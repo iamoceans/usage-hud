@@ -234,6 +234,19 @@ npm test
 
 ---
 
+## Claude Code Sidecar
+
+The repository also contains a standalone Claude Code sidecar package at `plugins/claude-usage-sidecar/`.
+
+Version 1 intentionally exposes only truthful values:
+
+- tool call counts
+- task and todo state
+- skill call counts when detectable
+- unavailable per-tool and per-skill token splits
+
+---
+
 ## 协议 / License
 
 Apache-2.0

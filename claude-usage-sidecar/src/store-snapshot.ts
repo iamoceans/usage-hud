@@ -1,0 +1,222 @@
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs"
+import * as path from "node:path"
+import { toPersistedSessionSnapshot } from "./aggregate-session-state.js"
+import type {
+  SessionIndex,
+  SessionIndexEntry,
+  SessionRuntimeState,
+  SessionSnapshot,
+  StreamCheckpoint,
+} from "./types.js"
+
+const INDEX_LOCK_RETRY_MS = 10
+const INDEX_LOCK_MAX_ATTEMPTS = 50
+
+const sleep = (ms: number): void => {
+  const end = Date.now() + ms
+
+  while (Date.now() < end) {
+    // Busy wait is acceptable here because writes are small and infrequent.
+  }
+}
+
+const atomicWriteJson = (targetFile: string, value: unknown): void => {
+  mkdirSync(path.dirname(targetFile), { recursive: true })
+
+  const tempFile = `${targetFile}.${process.pid}.${Math.random().toString(16).slice(2)}.tmp`
+
+  try {
+    writeFileSync(tempFile, JSON.stringify(value, null, 2), "utf8")
+    renameSync(tempFile, targetFile)
+  } catch (error) {
+    rmSync(tempFile, { force: true })
+    throw error
+  }
+}
+
+const normalizeSessionId = (sessionId: string): string => {
+  if (sessionId.trim().length === 0) {
+    throw new Error("sessionId must be a non-empty string")
+  }
+
+  return sessionId
+}
+
+const normalizeFileKey = (value: string, label: string): string => {
+  if (value.trim().length === 0) {
+    throw new Error(`${label} must be a non-empty string`)
+  }
+
+  return encodeURIComponent(value)
+}
+
+const toSnapshotFileName = (sessionId: string): string =>
+  `${normalizeFileKey(normalizeSessionId(sessionId), "sessionId")}.json`
+
+const withFileLock = (lockPath: string, action: () => void): void => {
+  mkdirSync(path.dirname(lockPath), { recursive: true })
+
+  let lockAcquired = false
+
+  for (let attempt = 0; attempt < INDEX_LOCK_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      mkdirSync(lockPath)
+      lockAcquired = true
+      break
+    } catch {
+      sleep(INDEX_LOCK_RETRY_MS)
+    }
+  }
+
+  if (!lockAcquired) {
+    throw new Error(`Could not acquire file lock for ${lockPath}`)
+  }
+
+  try {
+    action()
+  } finally {
+    rmSync(lockPath, { recursive: true, force: true })
+  }
+}
+
+const readSessionIndex = (indexFile: string): SessionIndex => {
+  if (!existsSync(indexFile)) {
+    return { sessions: [] }
+  }
+
+  let parsed: unknown
+
+  try {
+    parsed = JSON.parse(readFileSync(indexFile, "utf8")) as unknown
+  } catch {
+    return { sessions: [] }
+  }
+
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !("sessions" in parsed) ||
+    !Array.isArray(parsed.sessions)
+  ) {
+    return { sessions: [] }
+  }
+
+  const sessions = parsed.sessions.filter(
+    (entry): entry is SessionIndexEntry =>
+      typeof entry === "object" &&
+      entry !== null &&
+      typeof entry.sessionId === "string" &&
+      typeof entry.snapshotFile === "string" &&
+      ("startedAt" in entry ? entry.startedAt === null || typeof entry.startedAt === "string" : false) &&
+      ("lastActivityAt" in entry
+        ? entry.lastActivityAt === null || typeof entry.lastActivityAt === "string"
+        : false),
+  )
+
+  return { sessions }
+}
+
+const upsertSessionIndexEntry = (
+  indexFile: string,
+  snapshot: SessionSnapshot,
+  snapshotFile: string,
+): void => {
+  withFileLock(`${indexFile}.lock`, () => {
+    const nextEntry: SessionIndexEntry = {
+      sessionId: snapshot.sessionId,
+      snapshotFile,
+      startedAt: snapshot.startedAt,
+      lastActivityAt: snapshot.lastActivityAt,
+    }
+    const current = readSessionIndex(indexFile)
+    const remaining = current.sessions.filter(
+      (entry) => entry.sessionId !== snapshot.sessionId,
+    )
+
+    atomicWriteJson(indexFile, {
+      sessions: [...remaining, nextEntry].sort((left, right) =>
+        left.sessionId.localeCompare(right.sessionId),
+      ),
+    } satisfies SessionIndex)
+  })
+}
+
+export const writeSessionSnapshot = (
+  snapshotsDir: string,
+  snapshot: SessionRuntimeState | SessionSnapshot,
+  options?: {
+    indexFile?: string
+  },
+): void => {
+  const persistedSnapshot =
+    "openToolCalls" in snapshot
+      ? toPersistedSessionSnapshot(snapshot)
+      : snapshot
+  const snapshotFile = toSnapshotFileName(persistedSnapshot.sessionId)
+
+  atomicWriteJson(path.join(snapshotsDir, snapshotFile), persistedSnapshot)
+
+  if (typeof options?.indexFile === "string" && options.indexFile.length > 0) {
+    upsertSessionIndexEntry(options.indexFile, persistedSnapshot, snapshotFile)
+  }
+}
+
+const readCheckpointFile = (checkpointFile: string): StreamCheckpoint | null => {
+  if (!existsSync(checkpointFile)) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(readFileSync(checkpointFile, "utf8")) as unknown
+
+    if (typeof parsed !== "object" || parsed === null) {
+      return null
+    }
+
+    const record = parsed as { filePath?: unknown; offset?: unknown }
+
+    if (
+      typeof record.filePath !== "string" ||
+      record.filePath.length === 0 ||
+      typeof record.offset !== "number" ||
+      !Number.isFinite(record.offset)
+    ) {
+      return null
+    }
+
+    return { filePath: record.filePath, offset: record.offset }
+  } catch {
+    return null
+  }
+}
+
+export const readCheckpoint = (
+  checkpointsDir: string,
+  streamKey: string,
+): StreamCheckpoint | null => {
+  if (streamKey.trim().length === 0) {
+    return null
+  }
+
+  return readCheckpointFile(
+    path.join(checkpointsDir, `${normalizeFileKey(streamKey, "streamKey")}.json`),
+  )
+}
+
+export const writeCheckpoint = (
+  checkpointsDir: string,
+  streamKey: string,
+  checkpoint: StreamCheckpoint,
+): void => {
+  atomicWriteJson(
+    path.join(checkpointsDir, `${normalizeFileKey(streamKey, "streamKey")}.json`),
+    checkpoint,
+  )
+}

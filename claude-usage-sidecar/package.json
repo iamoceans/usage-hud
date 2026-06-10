@@ -1,0 +1,25 @@
+{
+  "name": "@usage-hud/claude-usage-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone Claude Code usage sidecar",
+  "bin": {
+    "claude-usage-sidecar": "./dist/cli.js"
+  },
+  "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -b tsconfig.json",
+    "build:force": "tsc -b tsconfig.json --force",
+    "clean": "node -e \"const fs=require('node:fs');fs.rmSync('dist',{recursive:true,force:true});fs.rmSync('.tsbuildinfo',{force:true})\"",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.9.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}

@@ -1,0 +1,6 @@
+# Per-plugin ignores — keep this package self-contained so it can be
+# vendored out of this monorepo without relying on a parent .gitignore.
+dist/
+node_modules/
+*.log
+.DS_Store
