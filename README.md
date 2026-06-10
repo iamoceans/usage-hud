@@ -1,7 +1,22 @@
 # usage-hud
 
+Two independent packages, both shipped from this repository:
+
+| Package | What it is | What it does |
+|---|---|---|
+| [`token-usage-tui/`](./token-usage-tui/) | opencode TUI plugin (SolidJS sidebar) | Renders a real-time token-usage panel in the opencode sidebar |
+| [`claude-usage-sidecar/`](./claude-usage-sidecar/) | Standalone Node CLI (no UI) | Scans `~/.claude/projects/**/*.jsonl` and emits a truthful per-session usage report for Claude Code |
+
+The two share no source, no dependencies, and no cross-imports. Pick the
+one you need; ignore the other.
+
+---
+
+> **The rest of this document describes `token-usage-tui/`** — the
+> opencode TUI plugin. For the Claude Code sidecar, jump to
+> [`claude-usage-sidecar/README.md`](./claude-usage-sidecar/README.md).
+
 > 实时在 opencode TUI 侧边栏渲染 token 消耗,按 **总计 / 工具 / 技能** 三维展示。
-> Real-time token consumption sidebar for opencode TUI, broken down by **total / tool / skill**.
 
 在 session 运行时,会在右侧 sidebar 显示类似这样的内容:
 While a session is running, the right sidebar shows something like:
@@ -42,9 +57,9 @@ cd usage-hud
 ### 2. 安装依赖 / Install dependencies
 
 ```bash
-cd plugins/token-usage-tui
+cd token-usage-tui
 npm install
-cd ../..
+cd ..
 ```
 
 ### 3. 配置 opencode 加载插件 / Configure opencode to load the plugin
@@ -65,8 +80,8 @@ cp tui.json ~/.config/opencode/tui.json
 **重要:必须编辑 `tui.json` 把 `file:///REPLACE-WITH-...` 替换成你机器上的绝对路径。**
 **Important: edit `tui.json` to replace `file:///REPLACE-WITH-...` with the absolute path on your machine.**
 
-- **macOS / Linux**: `file:///Users/you/path/to/usage-hud/plugins/token-usage-tui/src/index.tsx`
-- **Windows**: `file:///D:/path/to/usage-hud/plugins/token-usage-tui/src/index.tsx` (正斜杠 / forward slashes, 三个斜杠 / three slashes)
+- **macOS / Linux**: `file:///Users/you/path/to/usage-hud/token-usage-tui/src/index.tsx`
+- **Windows**: `file:///D:/path/to/usage-hud/token-usage-tui/src/index.tsx` (正斜杠 / forward slashes, 三个斜杠 / three slashes)
 
 ### 4. 重启 opencode / Restart opencode
 
@@ -91,15 +106,15 @@ Open any session, and the right sidebar will show the "─ Token Usage ─" bloc
 > **关于 Skill 维度** / **About the Skill dimension**:
 > `Skills Used` 现在只统计当前 session 内真实发起过的 `tool:skill` 调用,格式为 `170 tok / 1x`。
 > `Skills Used` now counts only real `tool:skill` calls from the current session, formatted as `170 tok / 1x`.
-> 其中 `x` 是真实调用次数;`tok` 需要配合可选 `plugins/token-usage-tui/src/server.ts` sidecar 插件,用每轮 system prompt 中 `<skill>` 块的 `chars/4` 做单次估算后累计。
-> Here `x` is the real call count; `tok` requires the optional `plugins/token-usage-tui/src/server.ts` sidecar plugin and is estimated from each skill block's `chars/4` footprint in the system prompt.
+> 其中 `x` 是真实调用次数;`tok` 需要配合可选 `token-usage-tui/src/server.ts` sidecar 插件,用每轮 system prompt 中 `<skill>` 块的 `chars/4` 做单次估算后累计。
+> Here `x` is the real call count; `tok` requires the optional `token-usage-tui/src/server.ts` sidecar plugin and is estimated from each skill block's `chars/4` footprint in the system prompt.
 > 如果 sidecar 暂时不存在或读取失败,UI 仍会保留真实 skill 调用,只是 token 估算会降级为 `0 tok / Nx`。
 > If the sidecar is missing or temporarily unreadable, the UI still shows real skill calls and simply degrades the estimate to `0 tok / Nx`.
 
 ### 可选: 安装 server sidecar 插件 / Optional: install the server sidecar plugin
 
-把 `plugins/token-usage-tui/src/server.ts` 复制到:
-Copy `plugins/token-usage-tui/src/server.ts` to:
+把 `token-usage-tui/src/server.ts` 复制到:
+Copy `token-usage-tui/src/server.ts` to:
 
 ```text
 <worktree>/.opencode/plugins/token-usage-server.ts
@@ -222,7 +237,7 @@ failed to load plugin
 ## 测试 / Testing
 
 ```bash
-cd plugins/token-usage-tui
+cd token-usage-tui
 npm test
 ```
 
@@ -236,17 +251,28 @@ npm test
 
 ## Claude Code Sidecar
 
-The repository also contains a standalone Claude Code sidecar package at `plugins/claude-usage-sidecar/`.
+The repository also ships a **standalone Claude Code sidecar CLI** at
+`claude-usage-sidecar/` (sibling of `token-usage-tui/`). It scans
+`~/.claude/projects/**/*.jsonl` and renders a truthful usage report for
+the current session — it is **not** loaded by opencode and has no
+runtime dependency on the TUI plugin above.
 
-Version 1 intentionally exposes only truthful values:
+Version 1 intentionally exposes only values it can verify directly:
 
-- tool call counts
-- task and todo state
-- skill call counts when detectable
-- unavailable per-tool and per-skill token splits
+- tool call counts (per `tool_use` block in the transcript)
+- task and todo state (`TodoWrite` tool calls)
+- skill call counts when the tool name is detectable
+- OAuth 5-hour / 7-day usage windows pulled from Anthropic's OAuth API
+  (optional, requires the local OAuth token to be present)
+
+The package **never** invents per-tool or per-skill token splits. See
+[`claude-usage-sidecar/README.md`](./claude-usage-sidecar/README.md) for
+the full v1 surface, build instructions, and the design rationale.
 
 ---
 
 ## 协议 / License
 
-Apache-2.0
+```text
+License: Apache-2.0
+```
